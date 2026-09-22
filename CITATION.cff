@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use the iLang loader, please cite it as below."
+title: "iLang loader: the official iLang runtime for any model"
+abstract: >-
+  The iLang loader fetches the official iLang runtime from the canon
+  repository, verifies its sha256, keeps a Last Known Good copy on disk and
+  adds it as the first system message of any model's conversation without
+  changing the user's messages. It is model-agnostic, has no dependencies,
+  checks for a new runtime at most once an hour, fails open when nothing
+  verified is available unless strict mode is set, and can pin an exact
+  runtime version so that benchmarks, audits and papers can be re-run against
+  the same context. Python and JavaScript implementations are provided.
+type: software
+authors:
+  - given-names: "Long Quan"
+    family-names: "Zhu"
+    orcid: "https://orcid.org/0009-0004-4540-8082"
+    affiliation: "iLang Inc."
+repository-code: "https://github.com/ilang-ai/ilang"
+url: "https://ilang.ai"
+license: MIT
+version: "1.0.0"
+date-released: "2026-09-22"
+keywords:
+  - iLang
+  - AI agents
+  - large language models
+  - protocol
+  - runtime loader
+  - prompt context
+  - reproducibility
