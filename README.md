@@ -78,17 +78,18 @@ The JavaScript API takes the same options as an object: `wrap(messages, { extens
 
 ## Checked with real models
 
-On 22 September 2026 one wrapped request went to each of these models, asking for an iLang operation chain that reads `report.csv`, keeps the failed rows, counts them and outputs the count. Each answered with HTTP 200, and each reply passes the canon grammar validator with no error or warning.
+On 23 September 2026 each of these models got the current core runtime through the loader and two requests. First, an iLang operation chain that reads `report.csv`, keeps the failed rows, counts them and outputs the count: every model answered with a chain that passes the canon grammar validator with no error or warning. Second, a question about a part the core bundle leaves out, the eight declaration body forms: every model said the section was not loaded and pointed to it instead of guessing.
 
-| Model | API | Reply |
+| Model | API | Chain |
 |---|---|---|
-| deepseek-v4-flash | OpenAI-compatible | `[READ:@LOCAL\|path=report.csv]=>[FILT\|whr=status:failed]=>[CNT]=>[Ω]` |
-| qwen-flash | OpenAI-compatible | `[READ:@SRC\|path=report.csv]=>[FILT\|whr=status=failed]=>[CNT]=>[Ω]` |
-| gemini-3.5-flash | OpenAI-compatible | `[READ:@LOCAL\|path=report.csv]=>[FILT\|whr=status:failed]=>[CNT]=>[Ω]` |
-| gpt-4o-mini | OpenAI-compatible | `[READ:@LOCAL\|path=report.csv]=>[FILT\|whr=status:failed]=>[CNT]=>[Ω]` |
-| claude-haiku-4-5 | Anthropic Messages, `ilang.system()` | `[READ:@LOCAL\|path=report.csv]=>[FILT\|whr=status:failed]=>[CNT]=>[OUT]` |
+| gpt-6-astra | OpenAI-compatible | `[READ:@LOCAL\|path=report.csv]=>[PARS\|fmt=csv]=>[FILT\|whr="status == failed"]=>[CNT]=>[OUT]` |
+| gemini-3.8-flash | OpenAI-compatible | `[READ:@LOCAL\|path=report.csv]=>[FILT\|whr="status=failed"]=>[CNT]=>[OUT]` |
+| deepseek-v4.1-flash | OpenAI-compatible | `[READ:@LOCAL\|path=report.csv\|fmt=csv]=>[FILT\|whr="status=failed"]=>[CNT]=>[OUT]` |
+| qwen3.8-max | OpenAI-compatible | `[READ:@LOCAL\|path=report.csv\|fmt=csv]=>[FILT\|whr=status=failed]=>[CNT]=>[OUT]` |
+| kimi-k3 | OpenAI-compatible | `[READ:@LOCAL\|path=report.csv]=>[FILT\|whr="status=failed"]=>[CNT]=>[OUT]` |
+| claude-fable-5.1 | Anthropic Messages, `ilang.system()` | `[READ:@LOCAL\|path=report.csv]=>[FILT\|whr="status=failed"]=>[CNT]=>[OUT]` |
 
-With `merge_system=True`, qwen-flash and deepseek-v4-flash answered the same way. This shows that each provider takes the wrapped request; how well a model follows iLang across the whole protocol is what the conformance suite measures. Run the same check against your own endpoint with [examples/check_providers.py](examples/check_providers.py).
+This shows that each provider takes the wrapped request; how well a model follows iLang across the whole protocol is what the conformance suite measures. Run the chain check against your own endpoint with [examples/check_providers.py](examples/check_providers.py).
 
 ## Pinning for research
 
