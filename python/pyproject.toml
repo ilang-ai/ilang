@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ilang-protocol"
-version = "1.0.0"
+version = "1.0.1"
 description = "The iLang loader: fetches the official iLang runtime, verifies it, caches it and puts it in front of any model's context. Don't learn iLang. Your AI should."
 readme = "README.md"
 requires-python = ">=3.9"

@@ -48,7 +48,7 @@ export class Loader {
     if (!OFFICIAL.some((p) => url.startsWith(p)) && !url.startsWith(this.runtime)) {
       throw new LoaderError(`refusing to fetch from ${url}`);
     }
-    const res = await fetch(url, { headers: { "User-Agent": "ilang-loader-js/1.0.0" },
+    const res = await fetch(url, { headers: { "User-Agent": "ilang-loader-js/1.0.1" },
       signal: AbortSignal.timeout(this.timeoutMs) });
     if (!res.ok) throw new LoaderError(`${url}: HTTP ${res.status}`);
     return Buffer.from(await res.arrayBuffer());

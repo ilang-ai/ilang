@@ -2,7 +2,7 @@
 
 **Don't learn iLang. Your AI should.**
 
-[![PyPI](https://img.shields.io/pypi/v/ilang-protocol?label=pip%20install%20ilang-protocol)](https://pypi.org/project/ilang-protocol/) [![npm](https://img.shields.io/npm/v/ilang?label=npm%20install%20ilang)](https://www.npmjs.com/package/ilang) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/ilang-protocol?label=pip%20install%20ilang-protocol)](https://pypi.org/project/ilang-protocol/) [![npm](https://img.shields.io/npm/v/ilang-protocol?label=npm%20install%20ilang-protocol)](https://www.npmjs.com/package/ilang-protocol) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22899027.svg)](https://doi.org/10.5281/zenodo.22899027)
 
 iLang is a protocol for AI, not a language for people to memorise. You keep saying what you want in your own words: your goals, your conditions, what may and may not be done. The AI reads iLang, writes it, checks it and works by it.
 
@@ -32,11 +32,11 @@ messages = ilang.wrap([{"role": "user", "content": "帮我分析这个问题"}])
 ```
 
 ```bash
-npm install ilang
+npm install ilang-protocol
 ```
 
 ```js
-import { wrap } from "ilang";
+import { wrap } from "ilang-protocol";
 
 const messages = await wrap([{ role: "user", content: "开始任务" }]);
 ```
@@ -80,7 +80,7 @@ What loading the runtime does and does not achieve is measured, not assumed: see
 
 ## Citation
 
-[CITATION.cff](CITATION.cff); Zenodo archives each release.
+[CITATION.cff](CITATION.cff); Zenodo archives each release. Concept DOI [10.5281/zenodo.22899027](https://doi.org/10.5281/zenodo.22899027) (all versions).
 
 ## License
 

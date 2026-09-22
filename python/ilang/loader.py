@@ -11,7 +11,7 @@ OFFICIAL = ("https://raw.githubusercontent.com/ilang-ai/", "https://github.com/i
             "https://ilang.ai/")
 TTL = 3600
 TIMEOUT = 10
-AGENT = "ilang-loader-python/1.0.0"
+AGENT = "ilang-loader-python/1.0.1"
 
 
 class LoaderError(RuntimeError):

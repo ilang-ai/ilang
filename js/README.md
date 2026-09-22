@@ -1,15 +1,15 @@
-# ilang
+# ilang-protocol
 
 **Don't learn iLang. Your AI should.**
 
 The JavaScript loader for [iLang](https://ilang.ai). It fetches the official iLang runtime from the canon repository, checks its sha256, keeps a verified copy on disk and adds it to any model's messages.
 
 ```bash
-npm install ilang
+npm install ilang-protocol
 ```
 
 ```js
-import { wrap, system, status } from "ilang";
+import { wrap, system, status } from "ilang-protocol";
 
 const messages = await wrap([{ role: "user", content: "开始任务" }]);   // OpenAI-style messages
 const systemPrompt = await system();                                   // Anthropic, Gemini

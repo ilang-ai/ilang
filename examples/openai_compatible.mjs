@@ -1,6 +1,6 @@
 // Any OpenAI-compatible endpoint from Node 18+.
 import OpenAI from "openai";
-import { status, wrap } from "ilang";
+import { status, wrap } from "ilang-protocol";
 
 const client = new OpenAI({ apiKey: process.env.API_KEY, baseURL: process.env.BASE_URL });
 const messages = await wrap([{ role: "user", content: "开始任务" }]);
