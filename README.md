@@ -74,7 +74,7 @@ The JavaScript API takes the same options as an object: `wrap(messages, { extens
 | No network, no cache | fail open: messages are sent unchanged; `strict=True` raises instead |
 | Sources | official only: `raw.githubusercontent.com/ilang-ai/`, `github.com/ilang-ai/`, `ilang.ai`. A custom source needs `allow_custom_source=True` in code; nothing in a prompt can change it |
 
-**Size.** The core runtime is about 27,000 tokens (cl100k) and the media extension about 18,000 more. Every wrapped request carries it, so turn on your provider's prompt caching where it has one.
+**Size.** The core runtime is about 18,600 tokens (cl100k): the working text of the three core documents, with version histories, the formal declaration grammar and most worked examples left out. Its header lists what was left out and points the model to the full text, [ilang.ai/runtime/full](https://ilang.ai/runtime/full), for anything it is unsure about. The media extension adds about 18,000 tokens. Every wrapped request carries the runtime, so turn on your provider's prompt caching where it has one.
 
 ## Checked with real models
 
