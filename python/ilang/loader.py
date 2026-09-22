@@ -2,8 +2,10 @@
 import hashlib
 import json
 import os
+import re
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 
 RUNTIME = "https://raw.githubusercontent.com/ilang-ai/ilang-spec/main/runtime"
@@ -11,7 +13,10 @@ OFFICIAL = ("https://raw.githubusercontent.com/ilang-ai/", "https://github.com/i
             "https://ilang.ai/")
 TTL = 3600
 TIMEOUT = 10
-AGENT = "ilang-loader-python/1.0.1"
+AGENT = "ilang-loader-python/1.1.0"
+CHANNELS = ("latest",)
+_COMMIT = re.compile(r"[0-9a-f]{7,40}")
+_VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.\-]*")
 
 
 class LoaderError(RuntimeError):
@@ -22,16 +27,23 @@ def _sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def iso(ts):
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts)) if ts else None
+
+
 class Loader:
     def __init__(self, runtime=RUNTIME, cache_dir=None, ttl=TTL, allow_custom_source=False):
         if not runtime.startswith(OFFICIAL) and not allow_custom_source:
             raise ValueError("iLang loads only from official sources unless allow_custom_source=True")
         self.runtime = runtime.rstrip("/")
+        parts = urllib.parse.urlsplit(self.runtime)
+        self._origin = "%s://%s/" % (parts.scheme, parts.netloc)
+        self._custom = allow_custom_source
         self.cache = cache_dir or os.environ.get("ILANG_CACHE_DIR") or os.path.join(
             os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache"), "ilang")
         self.ttl = ttl
-        self.state = {"loaded": False, "source": "none", "version": None, "source_commit": None,
-                      "last_check": None, "error": None}
+        self.state = {"loaded": False, "channel": "latest", "source": "none", "version": None,
+                      "source_commit": None, "last_check": None, "error": None}
         self._memo = {}
 
     def _read(self, *parts):
@@ -50,17 +62,25 @@ class Loader:
         os.replace(tmp, path)                     # atomic: a reader never sees half a file
 
     def _fetch(self, url):
-        if not url.startswith(OFFICIAL) and not url.startswith(self.runtime):
+        if not url.startswith(OFFICIAL) and not (self._custom and url.startswith(self._origin)):
             raise LoaderError("refusing to fetch from %s" % url)
         req = urllib.request.Request(url, headers={"User-Agent": AGENT})
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
             return r.read()
 
+    def _commit_base(self, commit):
+        """The runtime directory as it is at one commit: .../<ref>/runtime -> .../<commit>/runtime."""
+        ref_dir = self.runtime[:-len("/runtime")] if self.runtime.endswith("/runtime") else self.runtime
+        return ref_dir.rsplit("/", 1)[0] + "/" + commit + "/runtime"
+
     def _last_check(self):
         raw = self._read("state.json")
-        return json.loads(raw).get("last_check", 0) if raw else 0
+        if not raw:
+            return 0
+        state = json.loads(raw)                    # the JavaScript loader writes lastCheck
+        return state.get("last_check") or state.get("lastCheck") or 0
 
-    def _get(self, manifest, name, where, remote):
+    def _get(self, manifest, name, where, remote, base=None):
         """One bundle, verified against the manifest; (bytes, came_from_network)."""
         meta = manifest["bundles"].get(name)
         if meta is None:
@@ -70,46 +90,69 @@ class Loader:
             return data, False
         if not remote:
             raise LoaderError("no verified %s bundle in the cache" % name)
-        data = self._fetch(meta["url"])
+        url = base + "/" + meta["url"].rsplit("/", 1)[1] if base else meta["url"]
+        data = self._fetch(url)
         if len(data) != meta["bytes"] or _sha(data) != meta["sha256"]:
             raise LoaderError("the %s bundle failed its sha256 check" % name)
         return data, True
 
-    def _load(self, names, version):
-        where = ("versions", version) if version else ("latest",)
+    @staticmethod
+    def _where(version, commit):
+        return ("commits", commit) if commit else ("versions", version) if version else ("latest",)
+
+    def _load(self, names, version, commit):
+        where = self._where(version, commit)
+        pinned = bool(version or commit)
         cached = self._read(*where, "manifest.json")
         manifest = json.loads(cached) if cached else None
         checked = False
-        if manifest is None or (not version and time.time() - self._last_check() >= self.ttl):
-            url = "%s/versions/%s/manifest.json" % (self.runtime, version) if version else \
-                self.runtime + "/manifest.json"
+        base = self._commit_base(commit) if commit else None
+        if manifest is None or (not pinned and time.time() - self._last_check() >= self.ttl):
+            url = (base + "/manifest.json" if commit else
+                   "%s/versions/%s/manifest.json" % (self.runtime, version) if version else
+                   self.runtime + "/manifest.json")
             manifest, checked = json.loads(self._fetch(url)), True
-        got = [self._get(manifest, n, where, True) for n in names]
+        got = [self._get(manifest, n, where, True, base) for n in names]
         for n, (data, new) in zip(names, got):   # write only once everything has verified
             if new:
                 self._write(data, *where, n + ".md")
         if checked:
             self._write(json.dumps(manifest).encode(), *where, "manifest.json")
-            if not version:
-                self._write(json.dumps({"last_check": time.time()}).encode(), "state.json")
+            if not pinned:
+                now = time.time()
+                self._write(json.dumps({"last_check": now, "last_check_at": iso(now), "last_success_at": iso(now),
+                                        "active_version": manifest["version"], "source": "remote",
+                                        "status": "ok"}).encode(), "state.json")
         source = "remote" if checked or any(new for _, new in got) else "cache"
         return manifest, [data.decode("utf-8") for data, _ in got], source
 
-    def load(self, extensions=(), version=None, strict=False):
-        """The runtime text, or None when nothing verified is available and strict is off."""
+    def load(self, extensions=(), version=None, commit=None, channel="latest", strict=False):
+        """The runtime text, or None when nothing verified is available and strict is off.
+
+        version= or commit= pins an exact runtime; both are immutable, so a pinned runtime is
+        fetched once and then served from disk."""
+        if channel not in CHANNELS:
+            raise ValueError("channel %r is not available; use 'latest', or pin with version= or commit="
+                             % (channel,))
+        if version and commit:
+            raise ValueError("pin with version= or commit=, not both")
+        if commit is not None and not _COMMIT.fullmatch(commit):
+            raise ValueError("commit must be 7 to 40 lowercase hex characters")
+        if version is not None and not _VERSION.fullmatch(version):
+            raise ValueError("version must look like 2026.09.22-a69b7d69b3a6")
         names = ["core"] + [e for e in extensions if e != "core"]
-        key = (tuple(names), version)
+        key = (tuple(names), version, commit)
         hit = self._memo.get(key)
-        if hit and (version or time.time() - hit[1] < self.ttl):
+        if hit and (version or commit or time.time() - hit[1] < self.ttl):
             self.state.update(hit[2])
             return hit[0]
         try:
-            manifest, texts, source = self._load(names, version)
+            manifest, texts, source = self._load(names, version, commit)
             self.state["error"] = None
         except Exception as err:                  # network, hash or parse failure
             self.state["error"] = "%s: %s" % (type(err).__name__, err)
             try:                                  # Last Known Good, never the network
-                where = ("versions", version) if version else ("latest",)
+                where = self._where(version, commit)
                 manifest = json.loads(self._read(*where, "manifest.json") or b"null")
                 texts = [self._get(manifest, n, where, False)[0].decode("utf-8") for n in names]
                 source = "cache"
@@ -119,10 +162,11 @@ class Loader:
                 self.state.update(loaded=False, source="none")
                 return None
         self.state.update(loaded=True, source=source, version=manifest["version"],
+                          channel="pinned" if version or commit else "latest",
                           source_commit=manifest["source_commit"],
                           last_check=self._last_check() or None)
         text = "\n\n".join(texts)
         if self.state["error"] is None:           # a fallback copy is re-checked next call
             self._memo[key] = (text, time.time(), {k: self.state[k] for k in
-                                                    ("loaded", "source", "version", "source_commit")})
+                                                    ("loaded", "channel", "source", "version", "source_commit")})
         return text

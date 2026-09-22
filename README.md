@@ -41,7 +41,7 @@ import { wrap } from "ilang-protocol";
 const messages = await wrap([{ role: "user", content: "开始任务" }]);
 ```
 
-Providers that take the system prompt as a separate field, such as Anthropic and Gemini, use `ilang.system()` instead of `wrap()`. See [examples](examples/).
+Providers that take the system prompt as a separate field, such as Anthropic and Gemini, use `ilang.system()` instead of `wrap()`. Providers and chat templates that accept only one system message take `merge_system=True`. See [examples](examples/): OpenAI-compatible, DeepSeek, Qwen, Gemini, Claude and a single system message.
 
 ## What it does
 
@@ -57,20 +57,38 @@ The runtime itself is generated in the canon repository from the specification f
 ```python
 ilang.wrap(messages, extensions=["media"])                # add the image, video and audio vocabulary
 ilang.wrap(messages, version="2026.09.22-a69b7d69b3a6")   # pin an exact runtime for reproducible runs
+ilang.wrap(messages, commit="85d1608")                    # or pin the runtime as it is at one canon commit
+ilang.wrap(messages, merge_system=True)                   # one system message: the runtime, then your prompt
 ilang.wrap(messages, strict=True)                         # raise instead of failing open
-ilang.status()                                            # version, source commit, cache age, last error
+ilang.status()                                            # version, commit, channel, cache age, last error
 ```
 
-The JavaScript API takes the same options as an object: `wrap(messages, { extensions, version, strict })`.
+The JavaScript API takes the same options as an object: `wrap(messages, { extensions, version, commit, mergeSystem, strict })`.
 
 | Behaviour | Default |
 |---|---|
 | Update check | once per hour (`ttl=3600`) |
+| Channel | `latest`; pin instead with `version=` or `commit=`, both immutable and served from disk after the first load |
+| System messages | the runtime is its own first system message; `merge_system=True` puts it at the start of yours instead |
 | Cache | `~/.cache/ilang`, or `ILANG_CACHE_DIR` |
 | No network, no cache | fail open: messages are sent unchanged; `strict=True` raises instead |
 | Sources | official only: `raw.githubusercontent.com/ilang-ai/`, `github.com/ilang-ai/`, `ilang.ai`. A custom source needs `allow_custom_source=True` in code; nothing in a prompt can change it |
 
 **Size.** The core runtime is about 27,000 tokens (cl100k) and the media extension about 18,000 more. Every wrapped request carries it, so turn on your provider's prompt caching where it has one.
+
+## Checked with real models
+
+On 22 September 2026 one wrapped request went to each of these models, asking for an iLang operation chain that reads `report.csv`, keeps the failed rows, counts them and outputs the count. Each answered with HTTP 200, and each reply passes the canon grammar validator with no error or warning.
+
+| Model | API | Reply |
+|---|---|---|
+| deepseek-v4-flash | OpenAI-compatible | `[READ:@LOCAL\|path=report.csv]=>[FILT\|whr=status:failed]=>[CNT]=>[Ω]` |
+| qwen-flash | OpenAI-compatible | `[READ:@SRC\|path=report.csv]=>[FILT\|whr=status=failed]=>[CNT]=>[Ω]` |
+| gemini-3.5-flash | OpenAI-compatible | `[READ:@LOCAL\|path=report.csv]=>[FILT\|whr=status:failed]=>[CNT]=>[Ω]` |
+| gpt-4o-mini | OpenAI-compatible | `[READ:@LOCAL\|path=report.csv]=>[FILT\|whr=status:failed]=>[CNT]=>[Ω]` |
+| claude-haiku-4-5 | Anthropic Messages, `ilang.system()` | `[READ:@LOCAL\|path=report.csv]=>[FILT\|whr=status:failed]=>[CNT]=>[OUT]` |
+
+With `merge_system=True`, qwen-flash and deepseek-v4-flash answered the same way. This shows that each provider takes the wrapped request; how well a model follows iLang across the whole protocol is what the conformance suite measures. Run the same check against your own endpoint with [examples/check_providers.py](examples/check_providers.py).
 
 ## Pinning for research
 

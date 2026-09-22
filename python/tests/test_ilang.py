@@ -15,12 +15,13 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import ilang  # noqa: E402
-from ilang.injector import inject  # noqa: E402
+from ilang.injector import PREAMBLE, inject  # noqa: E402
 from ilang.loader import Loader, LoaderError  # noqa: E402
 
 
 class FakeRuntime:
-    """Serves runtime/manifest.json, bundles and versions/<v>/ from a temp directory."""
+    """Serves <ref>/runtime/manifest.json, bundles and versions/<v>/ from a temp directory,
+    laid out like raw.githubusercontent.com/ilang-ai/ilang-spec/<ref>/runtime."""
 
     def __init__(self):
         self.root = tempfile.mkdtemp()
@@ -28,25 +29,29 @@ class FakeRuntime:
         http.server.SimpleHTTPRequestHandler.log_message = lambda *a: None
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
-        self.base = "http://127.0.0.1:%d/runtime" % self.server.server_address[1]
+        self.host = "http://127.0.0.1:%d" % self.server.server_address[1]
+        self.base = self.host + "/main/runtime"
 
     def publish(self, version, texts, corrupt=None):
         bundles = {}
         for name, text in texts.items():
             data = text.encode("utf-8")
-            self._put(data, "runtime", name + ".md")
-            self._put(data, "runtime", "versions", version, name + ".md")
-            served = b"tampered" if corrupt == name else data
+            self._put(data, "main", "runtime", name + ".md")
+            self._put(data, "main", "runtime", "versions", version, name + ".md")
             if corrupt == name:
-                self._put(served, "runtime", name + ".md")
+                self._put(b"tampered", "main", "runtime", name + ".md")
             bundles[name] = {"url": "%s/%s.md" % (self.base, name), "bytes": len(data),
                              "sha256": hashlib.sha256(data).hexdigest()}
         manifest = {"brand": "iLang", "runtime_schema": 1, "version": version,
                     "source_commit": "c0ffee" + version, "bundles": bundles}
-        self._put(json.dumps(manifest).encode(), "runtime", "manifest.json")
+        self._put(json.dumps(manifest).encode(), "main", "runtime", "manifest.json")
         pinned = dict(manifest, bundles={n: dict(b, url="%s/versions/%s/%s.md" % (self.base, version, n))
                                          for n, b in bundles.items()})
-        self._put(json.dumps(pinned).encode(), "runtime", "versions", version, "manifest.json")
+        self._put(json.dumps(pinned).encode(), "main", "runtime", "versions", version, "manifest.json")
+
+    def snapshot(self, commit):
+        """The runtime directory as it is at one commit."""
+        shutil.copytree(os.path.join(self.root, "main", "runtime"), os.path.join(self.root, commit, "runtime"))
 
     def _put(self, data, *parts):
         path = os.path.join(self.root, *parts)
@@ -79,6 +84,9 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual(ld.state["source"], "remote")
         self.assertEqual(ld.state["version"], "v1")
         self.assertTrue(os.path.exists(os.path.join(self.cache, "latest", "core.md")))
+        with open(os.path.join(self.cache, "state.json"), encoding="utf-8") as f:
+            state = json.load(f)
+        self.assertEqual((state["active_version"], state["status"], state["source"]), ("v1", "ok", "remote"))
 
     def test_within_ttl_the_network_is_not_used(self):
         self.loader().load()
@@ -123,7 +131,26 @@ class LoaderTests(unittest.TestCase):
         self.remote.publish("v2", {"core": "CORE TWO", "media": "MEDIA TWO"})
         self.assertEqual(self.loader().load(version="v1"), "CORE ONE")
         self.remote.stop()
-        self.assertEqual(self.loader().load(version="v1"), "CORE ONE")
+        ld = self.loader()
+        self.assertEqual(ld.load(version="v1"), "CORE ONE")
+        self.assertEqual(ld.state["channel"], "pinned")
+
+    def test_pinned_commit_is_immutable_and_works_offline(self):
+        self.remote.snapshot("abc1234")
+        self.remote.publish("v2", {"core": "CORE TWO", "media": "MEDIA TWO"})
+        self.assertEqual(self.loader().load(), "CORE TWO")
+        self.assertEqual(self.loader().load(commit="abc1234", extensions=["media"]), "CORE ONE\n\nMEDIA ONE")
+        self.remote.stop()
+        ld = self.loader()
+        self.assertEqual(ld.load(commit="abc1234"), "CORE ONE")
+        self.assertEqual((ld.state["channel"], ld.state["version"]), ("pinned", "v1"))
+
+    def test_bad_pins_and_channels_are_refused(self):
+        ld = self.loader()
+        for kwargs in ({"channel": "stable"}, {"commit": "not-a-sha"}, {"commit": "ABC1234"},
+                       {"version": "../v1"}, {"version": "v1", "commit": "abc1234"}):
+            with self.assertRaises(ValueError, msg=kwargs):
+                ld.load(**kwargs)
 
     def test_extensions_are_loaded_on_request(self):
         self.assertEqual(self.loader().load(extensions=["media"]), "CORE ONE\n\nMEDIA ONE")
@@ -154,6 +181,23 @@ class InjectorTests(unittest.TestCase):
         self.assertIn("CORE ONE", out[0]["content"])
         self.assertEqual(out[1:], msgs)
 
+    def test_merge_system_puts_the_runtime_before_the_app_system_prompt(self):
+        msgs = [{"role": "system", "content": "app rules"}, {"role": "user", "content": "hi"}]
+        original = json.dumps(msgs)
+        out = ilang.wrap(msgs, merge_system=True)
+        self.assertEqual(json.dumps(msgs), original)
+        self.assertEqual(len(out), 2)
+        self.assertTrue(out[0]["content"].startswith(PREAMBLE))
+        self.assertTrue(out[0]["content"].endswith("</ilang-runtime>\n\napp rules"))
+        self.assertEqual(out[1], msgs[1])
+        parts = ilang.wrap([{"role": "system", "content": [{"type": "text", "text": "app rules"}]}],
+                           merge_system=True)
+        self.assertEqual(len(parts[0]["content"]), 2)
+        self.assertIn("CORE ONE", parts[0]["content"][0]["text"])
+        alone = ilang.wrap([{"role": "user", "content": "hi"}], merge_system=True)
+        self.assertEqual([m["role"] for m in alone], ["system", "user"])
+        self.assertEqual(ilang.wrap(out, merge_system=True), out)   # once only
+
     def test_runtime_is_added_only_once(self):
         once = ilang.wrap([{"role": "user", "content": "hi"}])
         again = ilang.wrap(once + [{"role": "assistant", "content": "ok"}, {"role": "user", "content": "next"}])
@@ -171,10 +215,12 @@ class InjectorTests(unittest.TestCase):
         self.assertEqual(ilang.system(), "")
         self.assertFalse(ilang.status()["loaded"])
 
-    def test_status_reports_version_and_commit(self):
+    def test_status_reports_version_commit_and_check_time(self):
         ilang.wrap([{"role": "user", "content": "hi"}])
         s = ilang.status()
-        self.assertEqual((s["brand"], s["version"], s["source_commit"]), ("iLang", "v1", "c0ffeev1"))
+        self.assertEqual((s["brand"], s["version"], s["commit"], s["channel"]), ("iLang", "v1", "c0ffeev1", "latest"))
+        self.assertRegex(s["last_check"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        self.assertGreaterEqual(s["age_seconds"], 0)
 
 
 @unittest.skipUnless(os.environ.get("ILANG_NETWORK_TESTS"), "set ILANG_NETWORK_TESTS=1")
@@ -187,6 +233,15 @@ class OfficialRuntimeTests(unittest.TestCase):
             self.assertIn("iLang runtime bundle (core)", text)
             self.assertIn("iLang runtime bundle (media)", text)
             self.assertEqual(ld.state["source"], "remote")
+        finally:
+            shutil.rmtree(cache, ignore_errors=True)
+
+    def test_a_pinned_commit_of_the_official_canon_loads(self):
+        cache = tempfile.mkdtemp()
+        try:
+            ld = Loader(cache_dir=cache)
+            self.assertIn("iLang runtime bundle (core)", ld.load(commit="85d1608", strict=True))
+            self.assertEqual(ld.state["version"], "2026.09.22-72c06dc60692")
         finally:
             shutil.rmtree(cache, ignore_errors=True)
 

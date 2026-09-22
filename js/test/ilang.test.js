@@ -1,8 +1,8 @@
-// Offline tests: a local HTTP server plays the official runtime.  node --test test/
+// Offline tests: a local HTTP server plays the official runtime.  node --test test/ilang.test.js
 // ILANG_NETWORK_TESTS=1 also checks the real official runtime.
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -12,6 +12,7 @@ import { Loader, LoaderError } from "../index.js";
 
 const sha = (s) => createHash("sha256").update(s).digest("hex");
 
+// Laid out like raw.githubusercontent.com/ilang-ai/ilang-spec/<ref>/runtime
 class FakeRuntime {
   async start() {
     this.root = mkdtempSync(join(tmpdir(), "ilang-remote-"));
@@ -20,7 +21,7 @@ class FakeRuntime {
       catch { res.statusCode = 404; res.end(); }
     });
     await new Promise((ok) => this.server.listen(0, "127.0.0.1", ok));
-    this.base = `http://127.0.0.1:${this.server.address().port}/runtime`;
+    this.base = `http://127.0.0.1:${this.server.address().port}/main/runtime`;
     return this;
   }
   put(data, ...parts) {
@@ -31,15 +32,18 @@ class FakeRuntime {
   publish(version, texts, corrupt) {
     const bundles = {};
     for (const [name, text] of Object.entries(texts)) {
-      this.put(corrupt === name ? "tampered" : text, "runtime", `${name}.md`);
-      this.put(text, "runtime", "versions", version, `${name}.md`);
+      this.put(corrupt === name ? "tampered" : text, "main", "runtime", `${name}.md`);
+      this.put(text, "main", "runtime", "versions", version, `${name}.md`);
       bundles[name] = { url: `${this.base}/${name}.md`, bytes: Buffer.byteLength(text), sha256: sha(text) };
     }
     const manifest = { brand: "iLang", runtime_schema: 1, version, source_commit: `c0ffee${version}`, bundles };
-    this.put(JSON.stringify(manifest), "runtime", "manifest.json");
+    this.put(JSON.stringify(manifest), "main", "runtime", "manifest.json");
     const pinned = { ...manifest, bundles: Object.fromEntries(Object.entries(bundles).map(([n, b]) =>
       [n, { ...b, url: `${this.base}/versions/${version}/${n}.md` }])) };
-    this.put(JSON.stringify(pinned), "runtime", "versions", version, "manifest.json");
+    this.put(JSON.stringify(pinned), "main", "runtime", "versions", version, "manifest.json");
+  }
+  snapshot(commit) {                               // the runtime directory as it is at one commit
+    cpSync(join(this.root, "main", "runtime"), join(this.root, commit, "runtime"), { recursive: true });
   }
   async stop() {
     if (this.server.listening) await new Promise((ok) => this.server.close(ok));
@@ -67,6 +71,8 @@ describe("loader", () => {
     assert.equal(ld.state.source, "remote");
     assert.equal(ld.state.version, "v1");
     assert.equal(readFileSync(join(cache, "latest", "core.md"), "utf8"), "CORE ONE");
+    const state = JSON.parse(readFileSync(join(cache, "state.json"), "utf8"));
+    assert.deepEqual([state.active_version, state.status, state.source], ["v1", "ok", "remote"]);
   });
   test("within the TTL the network is not used", async () => {
     await loader().load();
@@ -109,7 +115,25 @@ describe("loader", () => {
     remote.publish("v2", { core: "CORE TWO", media: "MEDIA TWO" });
     assert.equal(await loader().load({ version: "v1" }), "CORE ONE");
     await remote.stop();
-    assert.equal(await loader().load({ version: "v1" }), "CORE ONE");
+    const ld = loader();
+    assert.equal(await ld.load({ version: "v1" }), "CORE ONE");
+    assert.equal(ld.state.channel, "pinned");
+  });
+  test("a pinned commit is immutable and works offline", async () => {
+    remote.snapshot("abc1234");
+    remote.publish("v2", { core: "CORE TWO", media: "MEDIA TWO" });
+    assert.equal(await loader().load(), "CORE TWO");
+    assert.equal(await loader().load({ commit: "abc1234", extensions: ["media"] }), "CORE ONE\n\nMEDIA ONE");
+    await remote.stop();
+    const ld = loader();
+    assert.equal(await ld.load({ commit: "abc1234" }), "CORE ONE");
+    assert.deepEqual([ld.state.channel, ld.state.version], ["pinned", "v1"]);
+  });
+  test("bad pins and channels are refused", async () => {
+    for (const options of [{ channel: "stable" }, { commit: "not-a-sha" }, { commit: "ABC1234" },
+      { version: "../v1" }, { version: "v1", commit: "abc1234" }]) {
+      await assert.rejects(loader().load(options), Error, JSON.stringify(options));
+    }
   });
   test("extensions load on request", async () => {
     assert.equal(await loader().load({ extensions: ["media"] }), "CORE ONE\n\nMEDIA ONE");
@@ -132,6 +156,22 @@ describe("wrap", () => {
     assert.match(out[0].content, /CORE ONE/);
     assert.deepEqual(out.slice(1), msgs);
   });
+  test("mergeSystem puts the runtime before the app system prompt", async () => {
+    const msgs = [{ role: "system", content: "app rules" }, { role: "user", content: "hi" }];
+    const before = JSON.stringify(msgs);
+    const out = await ilang.wrap(msgs, { mergeSystem: true });
+    assert.equal(JSON.stringify(msgs), before);
+    assert.equal(out.length, 2);
+    assert.match(out[0].content, /^You have loaded the official iLang runtime/);
+    assert.match(out[0].content, /<\/ilang-runtime>\n\napp rules$/);
+    assert.deepEqual(out[1], msgs[1]);
+    const parts = await ilang.wrap([{ role: "system", content: [{ type: "text", text: "app rules" }] }], { mergeSystem: true });
+    assert.equal(parts[0].content.length, 2);
+    assert.match(parts[0].content[0].text, /CORE ONE/);
+    const alone = await ilang.wrap([{ role: "user", content: "hi" }], { mergeSystem: true });
+    assert.deepEqual(alone.map((m) => m.role), ["system", "user"]);
+    assert.deepEqual(await ilang.wrap(out, { mergeSystem: true }), out);   // once only
+  });
   test("runtime is added only once", async () => {
     const once = await ilang.wrap([{ role: "user", content: "hi" }]);
     const again = await ilang.wrap([...once, { role: "assistant", content: "ok" }, { role: "user", content: "next" }]);
@@ -145,22 +185,36 @@ describe("wrap", () => {
     assert.equal(await ilang.system(), "");
     assert.equal(ilang.status().loaded, false);
   });
-  test("status reports version and commit", async () => {
+  test("status reports version, commit and check time", async () => {
     await ilang.wrap([{ role: "user", content: "hi" }]);
     const s = ilang.status();
-    assert.deepEqual([s.brand, s.version, s.sourceCommit], ["iLang", "v1", "c0ffeev1"]);
+    assert.deepEqual([s.brand, s.version, s.commit, s.channel], ["iLang", "v1", "c0ffeev1", "latest"]);
+    assert.match(s.lastCheck, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+    assert.ok(s.ageSeconds >= 0);
   });
 });
 
-test("the official runtime loads and verifies", { skip: !process.env.ILANG_NETWORK_TESTS }, async () => {
-  const dir = mkdtempSync(join(tmpdir(), "ilang-official-"));
-  try {
-    const ld = new Loader({ cacheDir: dir });
-    const text = await ld.load({ extensions: ["media"], strict: true });
-    assert.match(text, /iLang runtime bundle \(core\)/);
-    assert.match(text, /iLang runtime bundle \(media\)/);
-    assert.equal(ld.state.source, "remote");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+describe("official runtime", { skip: !process.env.ILANG_NETWORK_TESTS }, () => {
+  test("the official runtime loads and verifies", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ilang-official-"));
+    try {
+      const ld = new Loader({ cacheDir: dir });
+      const text = await ld.load({ extensions: ["media"], strict: true });
+      assert.match(text, /iLang runtime bundle \(core\)/);
+      assert.match(text, /iLang runtime bundle \(media\)/);
+      assert.equal(ld.state.source, "remote");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  test("a pinned commit of the official canon loads", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "ilang-official-"));
+    try {
+      const ld = new Loader({ cacheDir: dir });
+      assert.match(await ld.load({ commit: "85d1608", strict: true }), /iLang runtime bundle \(core\)/);
+      assert.equal(ld.state.version, "2026.09.22-72c06dc60692");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

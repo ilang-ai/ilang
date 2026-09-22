@@ -1,7 +1,7 @@
 {
   "title": "iLang loader: the official iLang runtime for any model",
   "description": "<p>The iLang loader fetches the official iLang runtime from the canon repository, verifies its sha256, keeps a Last Known Good copy on disk and adds it as the first system message of any model's conversation without changing the user's messages. It is model-agnostic, has no dependencies, checks for a new runtime at most once an hour, fails open when nothing verified is available unless strict mode is set, and can pin an exact runtime version so that benchmarks, audits and papers can be re-run against the same context. Python (ilang-protocol on PyPI) and JavaScript (ilang-protocol on npm) implementations are provided.</p>",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "upload_type": "software",
   "license": "MIT",
   "access_right": "open",

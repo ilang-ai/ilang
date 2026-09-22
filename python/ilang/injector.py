@@ -19,10 +19,24 @@ def _has_runtime(message):
     return False
 
 
-def inject(messages, runtime_block):
-    """A new list: the runtime as the first system message, then the original messages
-    unchanged. Messages that already carry the runtime are returned as they are."""
+def inject(messages, runtime_block, merge_system=False):
+    """A new list with the runtime in front; the original messages are never modified.
+
+    By default the runtime is its own first system message, followed by the application's
+    messages. For providers that accept a single system message, merge_system=True puts the
+    runtime at the start of the application's system message instead. Messages that already
+    carry the runtime are returned as they are, so wrapping every turn is safe."""
     messages = list(messages)
     if runtime_block is None or any(_has_runtime(m) for m in messages):
         return messages
+    if merge_system:
+        for i, m in enumerate(messages):
+            if isinstance(m, dict) and m.get("role") == "system":
+                content = m.get("content")
+                if isinstance(content, list):
+                    merged = [{"type": "text", "text": runtime_block}] + content
+                else:
+                    merged = runtime_block + ("\n\n" + content if content else "")
+                messages[i] = dict(m, content=merged)
+                return messages
     return [{"role": "system", "content": runtime_block}] + messages
