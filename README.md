@@ -18,6 +18,14 @@ or teach me its syntax. From the next task on, use it internally to understand, 
 execute and verify.
 ```
 
+**You use an MCP client.** Connect `https://ilang.ai/mcp` once and your AI loads iLang itself: the prompt `ilang` or the tool `ilang_runtime` gives it the official runtime, `ilang_full` reads any section the core leaves out, and `ilang_validate` checks what it writes. In Claude Code:
+
+```bash
+claude mcp add --transport http ilang https://ilang.ai/mcp
+```
+
+In Claude and ChatGPT, add the URL as a connector.
+
 **You build with an API.** Install the loader and wrap your messages:
 
 ```bash
