@@ -1,0 +1,31 @@
+{
+  "name": "ilang",
+  "version": "1.0.0",
+  "description": "The iLang loader: fetches the official iLang runtime, verifies it, caches it and puts it in front of any model's context. Don't learn iLang. Your AI should.",
+  "type": "module",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  },
+  "files": ["index.js", "index.d.ts", "README.md", "LICENSE"],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/ilang.test.js"
+  },
+  "keywords": ["ilang", "iLang", "ai", "llm", "prompt", "protocol", "agent", "openai", "anthropic", "gemini", "deepseek"],
+  "homepage": "https://ilang.ai",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ilang-ai/ilang.git",
+    "directory": "js"
+  },
+  "bugs": "https://github.com/ilang-ai/ilang/issues",
+  "author": "Long Quan Zhu (https://orcid.org/0009-0004-4540-8082)",
+  "license": "MIT"
+}

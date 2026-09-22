@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ilang-protocol"
+version = "1.0.0"
+description = "The iLang loader: fetches the official iLang runtime, verifies it, caches it and puts it in front of any model's context. Don't learn iLang. Your AI should."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Long Quan Zhu" }]
+keywords = ["ilang", "iLang", "ai", "llm", "prompt", "protocol", "agent", "openai", "anthropic", "gemini", "deepseek"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://ilang.ai"
+Source = "https://github.com/ilang-ai/ilang"
+Specification = "https://github.com/ilang-ai/ilang-spec"
+
+[tool.setuptools]
+packages = ["ilang"]

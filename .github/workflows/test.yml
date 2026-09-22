@@ -1,0 +1,38 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit tests, plus the live official runtime
+        working-directory: python
+        env:
+          ILANG_NETWORK_TESTS: "1"
+        run: python -m unittest discover -s tests -v
+
+  node:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [18, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Unit tests, plus the live official runtime
+        working-directory: js
+        env:
+          ILANG_NETWORK_TESTS: "1"
+        run: node --test test/ilang.test.js

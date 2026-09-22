@@ -1,0 +1,90 @@
+# Bump the version in CITATION.cff (and in pyproject.toml, __init__.py and package.json,
+# which must agree) and push: this tags the release, Zenodo archives it from the release
+# webhook, and the packages go to PyPI (trusted publishing) and npm. Nothing runs when the
+# version is unchanged.
+name: Publish
+
+on:
+  push:
+    branches: [main]
+    paths: ['CITATION.cff']
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      tagged: ${{ steps.read.outputs.tagged }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Read the version and check every manifest agrees
+        id: read
+        run: |
+          v=$(sed -n 's/^version:[[:space:]]*"\{0,1\}\([^"[:space:]]*\)"\{0,1\}.*/\1/p' CITATION.cff | head -1)
+          py=$(sed -n 's/^version = "\(.*\)"/\1/p' python/pyproject.toml | head -1)
+          init=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' python/ilang/__init__.py | head -1)
+          js=$(node -p "require('./js/package.json').version")
+          echo "CITATION.cff $v | pyproject $py | __init__ $init | package.json $js"
+          if [ "$v" != "$py" ] || [ "$v" != "$init" ] || [ "$v" != "$js" ]; then
+            echo "versions disagree" >&2; exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$v" >/dev/null; then
+            echo "tagged=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tagged=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Tag and publish the GitHub release
+        if: steps.read.outputs.tagged == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.read.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "iLang loader $VERSION"
+          git push origin "v$VERSION"
+          gh release create "v$VERSION" --verify-tag --latest --generate-notes --title "iLang loader $VERSION"
+
+  pypi:
+    needs: release
+    if: needs.release.outputs.tagged == 'false'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: python -m pip install build && python -m build python
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: python/dist
+
+  npm:
+    needs: release
+    if: needs.release.outputs.tagged == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Publish to npm
+        working-directory: js
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --provenance --access public
