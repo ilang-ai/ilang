@@ -12,7 +12,7 @@ import time
 from .injector import block, inject
 from .loader import Loader, LoaderError, iso
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 __all__ = ["load", "wrap", "system", "status", "configure", "Loader", "LoaderError"]
 
 _loader = None

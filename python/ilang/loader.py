@@ -15,7 +15,7 @@ OFFICIAL = ("https://runtime.ilang.app/", "https://raw.githubusercontent.com/ila
             "https://github.com/ilang-ai/", "https://ilang.ai/")
 TTL = 3600
 TIMEOUT = 10
-AGENT = "ilang-loader-python/1.1.0"
+AGENT = "ilang-loader-python/1.1.1"
 CHANNELS = ("latest",)
 _COMMIT = re.compile(r"[0-9a-f]{7,40}")
 _VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.\-]*")
