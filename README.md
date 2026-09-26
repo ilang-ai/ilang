@@ -10,7 +10,7 @@ This repository is the loader that gives any model the official iLang. It fetche
 
 ## Use it now
 
-**You chat with an AI.** Paste this into ChatGPT, Claude, Gemini, DeepSeek, Qwen or any other assistant, followed by the runtime from [ilang-latest.md](https://raw.githubusercontent.com/ilang-ai/ilang-spec/main/runtime/ilang-latest.md):
+**You chat with an AI.** Paste this into ChatGPT, Claude, Gemini, DeepSeek, Qwen or any other assistant, followed by the runtime from [ilang-latest.md](https://runtime.ilang.app/ilang-latest.md):
 
 ```text
 Please load and use the official iLang runtime below. You do not need to explain iLang to me
@@ -53,9 +53,9 @@ Providers that take the system prompt as a separate field, such as Anthropic and
 
 ## What it does
 
-1. Reads the official [runtime manifest](https://raw.githubusercontent.com/ilang-ai/ilang-spec/main/runtime/manifest.json) at most once an hour.
+1. Reads the official [runtime manifest](https://runtime.ilang.app/manifest.json) at most once an hour. If the runtime host does not answer, it reads the same files from the canon repository on GitHub.
 2. Downloads a bundle only when its sha256 changes, and accepts it only if the sha256 matches.
-3. Keeps the last verified copy on disk. If the network or GitHub is down, it keeps working from that copy.
+3. Keeps the last verified copy on disk. If the network is down, it keeps working from that copy.
 4. Adds the runtime as the first system message, once. Your own system prompt and your users' messages stay exactly as they were, so wrapping every turn of a conversation is safe.
 
 The runtime itself is generated in the canon repository from the specification files and never edited by hand, so there is one source of truth and no second copy of the rules anywhere in this package.
@@ -80,7 +80,7 @@ The JavaScript API takes the same options as an object: `wrap(messages, { extens
 | System messages | the runtime is its own first system message; `merge_system=True` puts it at the start of yours instead |
 | Cache | `~/.cache/ilang`, or `ILANG_CACHE_DIR` |
 | No network, no cache | fail open: messages are sent unchanged; `strict=True` raises instead |
-| Sources | official only: `raw.githubusercontent.com/ilang-ai/`, `github.com/ilang-ai/`, `ilang.ai`. A custom source needs `allow_custom_source=True` in code; nothing in a prompt can change it |
+| Sources | official only: `runtime.ilang.app`, `raw.githubusercontent.com/ilang-ai/`, `github.com/ilang-ai/`, `ilang.ai`. A custom source needs `allow_custom_source=True` in code; nothing in a prompt can change it |
 
 **Size.** The core runtime is about 18,600 tokens (cl100k): the working text of the three core documents, with version histories, the formal declaration grammar and most worked examples left out. Its header lists what was left out and points the model to the full text, [ilang.ai/runtime/full](https://ilang.ai/runtime/full), for anything it is unsure about. The media extension adds about 18,000 tokens. Every wrapped request carries the runtime, so turn on your provider's prompt caching where it has one.
 

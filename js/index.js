@@ -6,8 +6,10 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const RUNTIME = "https://raw.githubusercontent.com/ilang-ai/ilang-spec/main/runtime";
-const OFFICIAL = ["https://raw.githubusercontent.com/ilang-ai/", "https://github.com/ilang-ai/", "https://ilang.ai/"];
+export const RUNTIME = "https://runtime.ilang.app";
+export const FALLBACK = "https://raw.githubusercontent.com/ilang-ai/ilang-spec/main/runtime";   // the canon itself
+const CANON = "https://raw.githubusercontent.com/ilang-ai/ilang-spec";                         // the canon at one commit
+const OFFICIAL = ["https://runtime.ilang.app/", "https://raw.githubusercontent.com/ilang-ai/", "https://github.com/ilang-ai/", "https://ilang.ai/"];
 const CHANNELS = ["latest"];
 const COMMIT = /^[0-9a-f]{7,40}$/;
 const VERSION = /^[0-9A-Za-z][0-9A-Za-z.-]*$/;
@@ -23,12 +25,18 @@ const sha = (buf) => createHash("sha256").update(buf).digest("hex");
 const iso = (seconds) => (seconds ? new Date(seconds * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") : null);
 
 export class Loader {
-  constructor({ runtime = RUNTIME, cacheDir, ttl = 3600, allowCustomSource = false, timeoutMs = 10000 } = {}) {
-    if (!OFFICIAL.some((p) => runtime.startsWith(p)) && !allowCustomSource) {
-      throw new Error("iLang loads only from official sources unless allowCustomSource is true");
+  constructor({ runtime = RUNTIME, fallback, cacheDir, ttl = 3600, allowCustomSource = false, timeoutMs = 10000 } = {}) {
+    if (fallback === undefined && runtime.replace(/\/+$/, "") === RUNTIME) fallback = FALLBACK;   // the canon repository, when the runtime host is down
+    for (const url of [runtime, fallback || runtime]) {
+      const u = url.replace(/\/+$/, "") + "/";
+      if (!OFFICIAL.some((p) => u.startsWith(p)) && !allowCustomSource) {
+        throw new Error("iLang loads only from official sources unless allowCustomSource is true");
+      }
     }
     this.runtime = runtime.replace(/\/+$/, "");
-    this.origin = new URL(this.runtime).origin + "/";
+    const fb = fallback ? fallback.replace(/\/+$/, "") : null;
+    this.fallback = fb && fb !== this.runtime ? fb : null;
+    this.origins = [this.runtime, this.fallback].filter(Boolean).map((u) => new URL(u).origin + "/");
     this.custom = allowCustomSource;
     this.cache = cacheDir || process.env.ILANG_CACHE_DIR ||
       join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "ilang");
@@ -52,7 +60,7 @@ export class Loader {
   }
 
   async #fetch(url) {
-    if (!OFFICIAL.some((p) => url.startsWith(p)) && !(this.custom && url.startsWith(this.origin))) {
+    if (!OFFICIAL.some((p) => url.startsWith(p)) && !(this.custom && this.origins.some((o) => url.startsWith(o)))) {
       throw new LoaderError(`refusing to fetch from ${url}`);
     }
     const res = await fetch(url, { headers: { "User-Agent": "ilang-loader-js/1.1.0" },
@@ -61,8 +69,11 @@ export class Loader {
     return Buffer.from(await res.arrayBuffer());
   }
 
-  // The runtime directory as it is at one commit: .../<ref>/runtime -> .../<commit>/runtime
+  // The runtime directory as it is at one commit. The runtime host serves only the current canon,
+  // so a commit is read from the canon repository; any other source is laid out like
+  // .../<ref>/runtime and has its ref replaced.
   #commitBase(commit) {
+    if (this.runtime === RUNTIME) return `${CANON}/${commit}/runtime`;
     const refDir = this.runtime.endsWith("/runtime") ? this.runtime.slice(0, -"/runtime".length) : this.runtime;
     return `${refDir.slice(0, refDir.lastIndexOf("/"))}/${commit}/runtime`;
   }
@@ -92,17 +103,17 @@ export class Loader {
     return [data, true];
   }
 
-  async #load(names, version, commit) {
+  // Load from one source: the runtime host by default, or the fallback.
+  async #load(names, version, commit, runtime = null) {
     const where = Loader.#where(version, commit);
     const pinned = Boolean(version || commit);
     const cached = await this.#read(...where, "manifest.json");
     let manifest = cached ? JSON.parse(cached) : null;
     let checked = false;
-    const base = commit ? this.#commitBase(commit) : null;
+    const sourceDir = runtime || this.runtime;
+    const base = commit ? this.#commitBase(commit) : version ? `${sourceDir}/versions/${version}` : sourceDir;
     if (!manifest || (!pinned && Date.now() / 1000 - (await this.#lastCheck()) >= this.ttl)) {
-      const url = commit ? `${base}/manifest.json`
-        : version ? `${this.runtime}/versions/${version}/manifest.json` : `${this.runtime}/manifest.json`;
-      manifest = JSON.parse(await this.#fetch(url));
+      manifest = JSON.parse(await this.#fetch(`${base}/manifest.json`));
       checked = true;
     }
     const got = [];
@@ -145,6 +156,16 @@ export class Loader {
       this.state.error = null;
     } catch (err) {
       this.state.error = `${err.name}: ${err.message}`;
+      if (this.fallback && !commit) {                // a commit is already read from the canon
+        try {
+          [manifest, texts, source] = await this.#load(names, version, commit, this.fallback);
+          this.state.error = null;
+        } catch (err2) {
+          this.state.error += `; fallback ${err2.name}: ${err2.message}`;
+        }
+      }
+    }
+    if (this.state.error !== null) {
       try {                                          // Last Known Good, never the network
         const where = Loader.#where(version, commit);
         manifest = JSON.parse((await this.#read(...where, "manifest.json")) || "null");
@@ -226,4 +247,4 @@ export function status() {
   return s;
 }
 
-export default { load, wrap, system, status, configure, Loader, LoaderError, RUNTIME };
+export default { load, wrap, system, status, configure, Loader, LoaderError, RUNTIME, FALLBACK };

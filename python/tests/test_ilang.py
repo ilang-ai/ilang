@@ -159,6 +159,22 @@ class LoaderTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Loader(runtime="https://example.com/runtime")
 
+    def test_the_default_source_is_the_runtime_host_with_the_canon_as_fallback(self):
+        ld = Loader(cache_dir=self.cache)
+        self.assertEqual(ld.runtime, "https://runtime.ilang.app")
+        self.assertEqual(ld.fallback, "https://raw.githubusercontent.com/ilang-ai/ilang-spec/main/runtime")
+        self.assertEqual(ld._commit_base("abc1234"),
+                         "https://raw.githubusercontent.com/ilang-ai/ilang-spec/abc1234/runtime")
+        self.assertIsNone(self.loader().fallback)            # a custom source has no fallback unless given
+
+    def test_when_the_runtime_host_is_down_the_fallback_serves(self):
+        dead = FakeRuntime()
+        dead.stop()
+        ld = Loader(runtime=dead.base, fallback=self.remote.base, cache_dir=self.cache, allow_custom_source=True)
+        self.assertEqual(ld.load(), "CORE ONE")
+        self.assertEqual((ld.state["source"], ld.state["error"]), ("remote", None))
+        self.assertEqual(ld.load(version="v1"), "CORE ONE")
+
 
 class InjectorTests(unittest.TestCase):
     def setUp(self):

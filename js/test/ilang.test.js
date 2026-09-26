@@ -141,6 +141,21 @@ describe("loader", () => {
   test("only official sources by default", () => {
     assert.throws(() => new Loader({ runtime: "https://example.com/runtime" }));
   });
+  test("the default source is the runtime host, with the canon as fallback", () => {
+    const ld = new Loader({ cacheDir: cache });
+    assert.deepEqual([ld.runtime, ld.fallback],
+      ["https://runtime.ilang.app", "https://raw.githubusercontent.com/ilang-ai/ilang-spec/main/runtime"]);
+    assert.equal(loader().fallback, null);           // a custom source has no fallback unless given
+  });
+  test("when the runtime host is down the fallback serves", async () => {
+    const dead = await new FakeRuntime().start();
+    await dead.stop();
+    rmSync(dead.root, { recursive: true, force: true });
+    const ld = new Loader({ runtime: dead.base, fallback: remote.base, cacheDir: cache, allowCustomSource: true });
+    assert.equal(await ld.load(), "CORE ONE");
+    assert.deepEqual([ld.state.source, ld.state.error], ["remote", null]);
+    assert.equal(await ld.load({ version: "v1" }), "CORE ONE");
+  });
 });
 
 describe("wrap", () => {

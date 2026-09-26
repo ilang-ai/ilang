@@ -8,9 +8,11 @@ import time
 import urllib.parse
 import urllib.request
 
-RUNTIME = "https://raw.githubusercontent.com/ilang-ai/ilang-spec/main/runtime"
-OFFICIAL = ("https://raw.githubusercontent.com/ilang-ai/", "https://github.com/ilang-ai/",
-            "https://ilang.ai/")
+RUNTIME = "https://runtime.ilang.app"
+FALLBACK = "https://raw.githubusercontent.com/ilang-ai/ilang-spec/main/runtime"   # the canon itself
+CANON = "https://raw.githubusercontent.com/ilang-ai/ilang-spec/%s/runtime"       # the canon at one commit
+OFFICIAL = ("https://runtime.ilang.app/", "https://raw.githubusercontent.com/ilang-ai/",
+            "https://github.com/ilang-ai/", "https://ilang.ai/")
 TTL = 3600
 TIMEOUT = 10
 AGENT = "ilang-loader-python/1.1.0"
@@ -27,17 +29,27 @@ def _sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def _origin(url):
+    parts = urllib.parse.urlsplit(url)
+    return "%s://%s/" % (parts.scheme, parts.netloc)
+
+
 def iso(ts):
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ts)) if ts else None
 
 
 class Loader:
-    def __init__(self, runtime=RUNTIME, cache_dir=None, ttl=TTL, allow_custom_source=False):
-        if not runtime.startswith(OFFICIAL) and not allow_custom_source:
-            raise ValueError("iLang loads only from official sources unless allow_custom_source=True")
+    def __init__(self, runtime=RUNTIME, cache_dir=None, ttl=TTL, allow_custom_source=False, fallback=None):
+        if fallback is None and runtime.rstrip("/") == RUNTIME:
+            fallback = FALLBACK                   # the canon repository, when the runtime host is down
+        for url in (runtime, fallback or runtime):
+            if not (url.rstrip("/") + "/").startswith(OFFICIAL) and not allow_custom_source:
+                raise ValueError("iLang loads only from official sources unless allow_custom_source=True")
         self.runtime = runtime.rstrip("/")
-        parts = urllib.parse.urlsplit(self.runtime)
-        self._origin = "%s://%s/" % (parts.scheme, parts.netloc)
+        self.fallback = fallback.rstrip("/") if fallback else None
+        if self.fallback == self.runtime:
+            self.fallback = None
+        self._origins = tuple(_origin(u) for u in (self.runtime, self.fallback) if u)
         self._custom = allow_custom_source
         self.cache = cache_dir or os.environ.get("ILANG_CACHE_DIR") or os.path.join(
             os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache"), "ilang")
@@ -62,14 +74,18 @@ class Loader:
         os.replace(tmp, path)                     # atomic: a reader never sees half a file
 
     def _fetch(self, url):
-        if not url.startswith(OFFICIAL) and not (self._custom and url.startswith(self._origin)):
+        if not url.startswith(OFFICIAL) and not (self._custom and url.startswith(self._origins)):
             raise LoaderError("refusing to fetch from %s" % url)
         req = urllib.request.Request(url, headers={"User-Agent": AGENT})
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
             return r.read()
 
     def _commit_base(self, commit):
-        """The runtime directory as it is at one commit: .../<ref>/runtime -> .../<commit>/runtime."""
+        """The runtime directory as it is at one commit. The runtime host serves only the current
+        canon, so a commit is read from the canon repository; any other source is laid out like
+        .../<ref>/runtime and has its ref replaced."""
+        if self.runtime == RUNTIME:
+            return CANON % commit
         ref_dir = self.runtime[:-len("/runtime")] if self.runtime.endswith("/runtime") else self.runtime
         return ref_dir.rsplit("/", 1)[0] + "/" + commit + "/runtime"
 
@@ -100,18 +116,18 @@ class Loader:
     def _where(version, commit):
         return ("commits", commit) if commit else ("versions", version) if version else ("latest",)
 
-    def _load(self, names, version, commit):
+    def _load(self, names, version, commit, runtime=None):
+        """Load from one source: the runtime host by default, or the fallback."""
         where = self._where(version, commit)
         pinned = bool(version or commit)
         cached = self._read(*where, "manifest.json")
         manifest = json.loads(cached) if cached else None
         checked = False
-        base = self._commit_base(commit) if commit else None
+        source_dir = runtime or self.runtime
+        base = (self._commit_base(commit) if commit else
+                "%s/versions/%s" % (source_dir, version) if version else source_dir)
         if manifest is None or (not pinned and time.time() - self._last_check() >= self.ttl):
-            url = (base + "/manifest.json" if commit else
-                   "%s/versions/%s/manifest.json" % (self.runtime, version) if version else
-                   self.runtime + "/manifest.json")
-            manifest, checked = json.loads(self._fetch(url)), True
+            manifest, checked = json.loads(self._fetch(base + "/manifest.json")), True
         got = [self._get(manifest, n, where, True, base) for n in names]
         for n, (data, new) in zip(names, got):   # write only once everything has verified
             if new:
@@ -151,6 +167,13 @@ class Loader:
             self.state["error"] = None
         except Exception as err:                  # network, hash or parse failure
             self.state["error"] = "%s: %s" % (type(err).__name__, err)
+            if self.fallback and not commit:      # a commit is already read from the canon
+                try:
+                    manifest, texts, source = self._load(names, version, commit, self.fallback)
+                    self.state["error"] = None
+                except Exception as err2:
+                    self.state["error"] += "; fallback %s: %s" % (type(err2).__name__, err2)
+        if self.state["error"] is not None:
             try:                                  # Last Known Good, never the network
                 where = self._where(version, commit)
                 manifest = json.loads(self._read(*where, "manifest.json") or b"null")
