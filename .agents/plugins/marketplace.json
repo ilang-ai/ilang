@@ -1,0 +1,20 @@
+{
+  "name": "ilang",
+  "interface": {
+    "displayName": "iLang"
+  },
+  "plugins": [
+    {
+      "name": "ilang",
+      "source": {
+        "source": "local",
+        "path": "./plugins/ilang"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

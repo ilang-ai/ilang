@@ -28,6 +28,20 @@ claude mcp add --transport http ilang https://ilang.ai/mcp
 
 In Claude and ChatGPT, add the URL as a connector.
 
+**You use Gemini CLI.** The same server ships as an extension of this repository: the tools plus a context file that tells the model when to use them.
+
+```bash
+gemini extensions install https://github.com/ilang-ai/ilang
+```
+
+**You use Codex.** This repository is also a plugin marketplace with one plugin, `ilang`: the same MCP server plus a skill.
+
+```bash
+codex plugin marketplace add ilang-ai/ilang
+```
+
+Then `/plugins`, install `ilang`, and start a new session. The plugin folder, `plugins/ilang/`, is the package submitted to the ChatGPT plugin directory.
+
 **You build with an API.** Install the loader and wrap your messages:
 
 ```bash

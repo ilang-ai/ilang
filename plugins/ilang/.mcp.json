@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ilang": {
+      "type": "http",
+      "url": "https://ilang.ai/mcp"
+    }
+  }
+}

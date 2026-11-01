@@ -1,0 +1,12 @@
+{
+  "name": "ilang",
+  "version": "1.0.0",
+  "description": "iLang, the native language of AI, as MCP tools from ilang.ai/mcp: the official runtime, the canon grammar validator, dictionary and FAQ lookup, SOUL 2.0 and Source Book 2.9. Read-only, no key.",
+  "mcpServers": {
+    "ilang": {
+      "httpUrl": "https://ilang.ai/mcp",
+      "timeout": 60000
+    }
+  },
+  "contextFileName": "GEMINI.md"
+}
