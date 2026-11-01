@@ -6,8 +6,10 @@ on:
 
 jobs:
   python:
-    runs-on: ubuntu-latest
+    # ubuntu-latest moved to 26.04, which has no Python 3.9; pyproject still supports >=3.9.
+    runs-on: ubuntu-24.04
     strategy:
+      fail-fast: false
       matrix:
         python: ["3.9", "3.12"]
     steps:
@@ -24,6 +26,7 @@ jobs:
   node:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         node: [18, 22]
     steps:
