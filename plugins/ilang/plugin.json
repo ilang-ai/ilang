@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "ilang",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "iLang, the native language of AI: the official runtime, the canon validator, dictionary and FAQ lookup, SOUL 2.0 and Source Book 2.9, from ilang.ai/mcp.",
   "author": {
     "name": "iLang Inc.",

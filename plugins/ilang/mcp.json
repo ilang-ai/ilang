@@ -3,7 +3,7 @@
   "mcpServers": {
     "ilang": {
       "type": "streamable-http",
-      "url": "https://ilang.ai/mcp",
+      "url": "https://mcp.ilang.ai/mcp",
       "extensions": {
         "com.openai": {
           "auth": {
