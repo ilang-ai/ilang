@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "ilang",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "iLang, the native language of AI: the official runtime, the canon validator, dictionary and FAQ lookup, SOUL 2.0 and Source Book 2.9, from ilang.ai/mcp.",
   "author": {
     "name": "iLang Inc.",
@@ -59,7 +59,7 @@
               "description": "Validate iLang and suggest the right modifier",
               "prompt": "Check this iLang line and fix it: [XLAT:@USER|src=en|tgt=zh]=>[Ω]",
               "tools_triggered": "ilang_validate",
-              "expected_behavior": "Calls ilang_validate. Reports one error, E302 for the modifier tgt, with did_you_mean lng, and gives the corrected line [XLAT:@USER|src=en|lng=zh]=>[Ω]."
+              "expected_behavior": "Calls ilang_validate. Reports one error, E302 for the modifier tgt, with did_you_mean lng, and gives a corrected line that uses lng=zh and validates with zero errors."
             },
             {
               "description": "Look up a verb in the iLang dictionary",
@@ -96,7 +96,8 @@
           ]
         },
         "commerce": false,
-        "commerce_description": "This plugin does not sell products or process payments."
+        "commerce_description": "This plugin does not sell products or process payments.",
+        "demo_recording_url": "https://ilang.ai/review/ilang-chatgpt-demo-v1.0-2026-11-01.mp4"
       },
       "publication": {
         "release_notes": "First release: nine read-only tools from ilang.ai/mcp (the iLang runtime and its lite form, sections of the full text, the canon grammar validator with modifier suggestions, dictionary and FAQ lookup, SOUL 2.0, Source Book 2.9 and the engineering book check), plus a skill that tells the model when to use them. No API key."
