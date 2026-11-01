@@ -1,14 +1,14 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "ilang",
-  "version": "1.0.5",
-  "description": "iLang, the native language of AI: the official runtime, the canon validator, dictionary and FAQ lookup, SOUL 2.0 and Source Book 2.9, from ilang.ai/mcp.",
+  "version": "1.0.6",
+  "description": "iLang, the native language of AI: the official runtime, the canon validator, dictionary and FAQ lookup, SOUL 2.0 and Source Book 2.9, from mcp.ilang.ai/mcp.",
   "author": {
     "name": "iLang Inc.",
     "email": "contact@ilang.ai",
     "url": "https://ilang.ai"
   },
-  "homepage": "https://ilang.ai/mcp",
+  "homepage": "https://mcp.ilang.ai/mcp",
   "repository": "https://github.com/ilang-ai/ilang",
   "license": "MIT",
   "keywords": [
@@ -100,7 +100,7 @@
         "demo_recording_url": "https://ilang.ai/review/ilang-chatgpt-demo-v1.0-2026-11-01.mp4"
       },
       "publication": {
-        "release_notes": "First release: nine read-only tools from ilang.ai/mcp (the iLang runtime and its lite form, sections of the full text, the canon grammar validator with modifier suggestions, dictionary and FAQ lookup, SOUL 2.0, Source Book 2.9 and the engineering book check), plus a skill that tells the model when to use them. No API key."
+        "release_notes": "First release: nine read-only tools from mcp.ilang.ai/mcp (the iLang runtime and its lite form, sections of the full text, the canon grammar validator with modifier suggestions, dictionary and FAQ lookup, SOUL 2.0, Source Book 2.9 and the engineering book check), plus a skill that tells the model when to use them. No API key."
       }
     }
   }

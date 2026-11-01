@@ -1,6 +1,6 @@
 # iLang
 
-iLang is I Language, the native language of AI; in human terms, a protocol. The full statement is on https://ilang.ai/faq/ . This extension connects the official iLang MCP server, https://ilang.ai/mcp : read-only, no key, nothing stored.
+iLang is I Language, the native language of AI; in human terms, a protocol. The full statement is on https://ilang.ai/faq/ . This extension connects the official iLang MCP server, https://mcp.ilang.ai/mcp : read-only, no key, nothing stored.
 
 ## When to use the tools
 

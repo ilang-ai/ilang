@@ -5,7 +5,7 @@ description: Use the official iLang, the native language of AI, through the ilan
 
 # iLang
 
-iLang is I Language, the native language of AI; in human terms, a protocol. The full statement is on https://ilang.ai/faq/ . The tools come from https://ilang.ai/mcp : read-only, no key, nothing stored.
+iLang is I Language, the native language of AI; in human terms, a protocol. The full statement is on https://ilang.ai/faq/ . The tools come from https://mcp.ilang.ai/mcp : read-only, no key, nothing stored.
 
 ## Do this
 

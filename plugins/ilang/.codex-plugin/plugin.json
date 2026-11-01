@@ -1,13 +1,13 @@
 {
   "name": "ilang",
-  "version": "1.0.5",
-  "description": "iLang, the native language of AI: the official runtime, the canon validator, dictionary and FAQ lookup, SOUL 2.0 and Source Book 2.9, from ilang.ai/mcp.",
+  "version": "1.0.6",
+  "description": "iLang, the native language of AI: the official runtime, the canon validator, dictionary and FAQ lookup, SOUL 2.0 and Source Book 2.9, from mcp.ilang.ai/mcp.",
   "author": {
     "name": "iLang Inc.",
     "email": "contact@ilang.ai",
     "url": "https://ilang.ai"
   },
-  "homepage": "https://ilang.ai/mcp",
+  "homepage": "https://mcp.ilang.ai/mcp",
   "repository": "https://github.com/ilang-ai/ilang",
   "license": "MIT",
   "keywords": ["ilang", "i-language", "protocol", "ai-agents", "mcp", "engineering-book", "soul", "source-book", "validator"],

@@ -2,7 +2,7 @@
   "mcpServers": {
     "ilang": {
       "type": "http",
-      "url": "https://ilang.ai/mcp"
+      "url": "https://mcp.ilang.ai/mcp"
     }
   }
 }
