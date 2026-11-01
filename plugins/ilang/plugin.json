@@ -1,0 +1,106 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "ilang",
+  "version": "1.0.2",
+  "description": "iLang, the native language of AI: the official runtime, the canon validator, dictionary and FAQ lookup, SOUL 2.0 and Source Book 2.9, from ilang.ai/mcp.",
+  "author": {
+    "name": "iLang Inc.",
+    "email": "contact@ilang.ai",
+    "url": "https://ilang.ai"
+  },
+  "homepage": "https://ilang.ai/mcp",
+  "repository": "https://github.com/ilang-ai/ilang",
+  "license": "MIT",
+  "keywords": [
+    "ilang",
+    "i-language",
+    "protocol",
+    "ai-agents",
+    "mcp",
+    "engineering-book",
+    "soul",
+    "source-book",
+    "validator"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "iLang",
+        "shortDescription": "The native language of AI",
+        "longDescription": "Gives the model the official iLang through read-only MCP tools: the runtime (checked against the canon's sha256) or its syntax and vocabulary alone, any section of the full text, the canon grammar validator, lookup over the dictionary and the ilang.ai FAQ, and the two published iLang documents, SOUL 2.0 and Source Book 2.9, with version, DOI and sha256. With the Source Book, the model can turn a tutorial into BOOK.md, an iLang engineering book, and check it with ilang_book_check. No API key.",
+        "developerName": "iLang Inc.",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Read"
+        ],
+        "websiteURL": "https://ilang.ai",
+        "supportURL": "https://github.com/ilang-ai/ilang-research/issues/new/choose",
+        "privacyPolicyURL": "https://ilang.ai/privacy",
+        "termsOfServiceURL": "https://ilang.ai/terms/",
+        "defaultPrompt": [
+          "Load the iLang runtime, then write an iLang engineering book from this tutorial and check it"
+        ],
+        "brandColor": "#121314",
+        "brandColorDark": "#e0b96a",
+        "composerIcon": "./assets/ilang-small.svg",
+        "logo": "./assets/ilang.png",
+        "screenshots": []
+      },
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Load the iLang runtime",
+              "prompt": "Load the iLang runtime and tell me which runtime version you loaded.",
+              "tools_triggered": "ilang_runtime",
+              "expected_behavior": "Calls ilang_runtime once. The reply names the runtime version from the <ilang-runtime version=...> tag, for example 2026.10.31-6f17c3d64219, and does not teach iLang syntax unprompted."
+            },
+            {
+              "description": "Validate iLang and suggest the right modifier",
+              "prompt": "Check this iLang line and fix it: [XLAT:@USER|src=en|tgt=zh]=>[Ω]",
+              "tools_triggered": "ilang_validate",
+              "expected_behavior": "Calls ilang_validate. Reports one error, E302 for the modifier tgt, with did_you_mean lng, and gives the corrected line [XLAT:@USER|src=en|lng=zh]=>[Ω]."
+            },
+            {
+              "description": "Look up a verb in the iLang dictionary",
+              "prompt": "In iLang, what does the verb XLAT do, and what is its Greek alias?",
+              "tools_triggered": "ilang_lookup",
+              "expected_behavior": "Calls ilang_lookup with XLAT. Answers: a Transform verb that translates between languages, alias θ, with the dictionary link https://ilang.ai/dictionary/ ."
+            },
+            {
+              "description": "Return the published SOUL 2.0 document",
+              "prompt": "Give me the iLang SOUL 2.0 document with its DOI.",
+              "tools_triggered": "ilang_soul",
+              "expected_behavior": "Calls ilang_soul. Quotes the document as returned and gives version 2.0, DOI 10.5281/zenodo.23778215 and the sha256 9b22c7d5bbbcbca24db044cb5c9d2bb98b8e019b776a764e339b505d465a66f1."
+            },
+            {
+              "description": "Check an engineering book",
+              "prompt": "Run the iLang book check on this engineering book:\n::ILANG::v5.0::ENGINEERING_BOOK\n[READ:@LOCAL|path=README.md]=>[SHRT|len=short]=>[Ω]\n::ILANG::v5.0::ENGINEERING_BOOK",
+              "tools_triggered": "ilang_book_check",
+              "expected_behavior": "Calls ilang_book_check with the full text. Reports pass true: A1 found 2 markers, A2 zero errors and zero warnings."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Plain translation request; iLang has a translate verb, but the user only wants a translation",
+              "prompt": "Translate this into Chinese: The meeting has moved to Friday."
+            },
+            {
+              "description": "General code validation; ilang_validate checks only iLang text",
+              "prompt": "Write a Python function that validates an email address."
+            },
+            {
+              "description": "English word definition; ilang_lookup covers only iLang terms",
+              "prompt": "What does the word serendipity mean?"
+            }
+          ]
+        },
+        "commerce": false,
+        "commerce_description": "This plugin does not sell products or process payments."
+      },
+      "publication": {
+        "release_notes": "First release: nine read-only tools from ilang.ai/mcp (the iLang runtime and its lite form, sections of the full text, the canon grammar validator with modifier suggestions, dictionary and FAQ lookup, SOUL 2.0, Source Book 2.9 and the engineering book check), plus a skill that tells the model when to use them. No API key."
+      }
+    }
+  }
+}

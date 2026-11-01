@@ -1,6 +1,6 @@
 {
   "name": "ilang",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "iLang, the native language of AI: the official runtime, the canon validator, dictionary and FAQ lookup, SOUL 2.0 and Source Book 2.9, from ilang.ai/mcp.",
   "author": {
     "name": "iLang Inc.",
@@ -15,8 +15,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "iLang",
-    "shortDescription": "The native language of AI: runtime, validator, SOUL and Source Book as tools",
-    "longDescription": "Gives the model the official iLang: the runtime it loads once per conversation (verified against the canon's sha256), the full text for any section the runtime leaves out, the canon grammar validator in strict mode, lookup over the dictionary and the ilang.ai FAQ, and the two published iLang documents, SOUL 2.0 and Source Book 2.9, as files with version, DOI and sha256. Give it a tutorial and it writes BOOK.md, an executable iLang engineering book, checked by the same validator. Read-only, no key, nothing stored.",
+    "shortDescription": "The native language of AI",
+    "longDescription": "Gives the model the official iLang through read-only MCP tools: the runtime (checked against the canon's sha256) or its syntax and vocabulary alone, any section of the full text, the canon grammar validator, lookup over the dictionary and the ilang.ai FAQ, and the two published iLang documents, SOUL 2.0 and Source Book 2.9, with version, DOI and sha256. With the Source Book, the model can turn a tutorial into BOOK.md, an iLang engineering book, and check it with ilang_book_check. No API key.",
     "developerName": "iLang Inc.",
     "category": "Developer Tools",
     "capabilities": ["Read"],
