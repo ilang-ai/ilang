@@ -1,5 +1,7 @@
 # iLang
 
+**What iLang is.** iLang is I Language, the native language of AI; in human terms, a protocol. The full statement is on [ilang.ai](https://ilang.ai/faq/).
+
 **Don't learn iLang. Your AI should.**
 
 [![PyPI](https://img.shields.io/pypi/v/ilang-protocol?label=pip%20install%20ilang-protocol)](https://pypi.org/project/ilang-protocol/) [![npm](https://img.shields.io/npm/v/ilang-protocol?label=npm%20install%20ilang-protocol)](https://www.npmjs.com/package/ilang-protocol) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22899027.svg)](https://doi.org/10.5281/zenodo.22899027)
