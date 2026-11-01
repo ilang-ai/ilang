@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "ilang",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "iLang, the native language of AI: the official runtime, the canon validator, dictionary and FAQ lookup, SOUL 2.0 and Source Book 2.9, from ilang.ai/mcp.",
   "author": {
     "name": "iLang Inc.",
@@ -53,7 +53,7 @@
               "description": "Load the iLang runtime",
               "prompt": "Load the iLang runtime and tell me which runtime version you loaded.",
               "tools_triggered": "ilang_runtime",
-              "expected_behavior": "Calls ilang_runtime once. The reply names the runtime version from the <ilang-runtime version=...> tag, for example 2026.10.31-6f17c3d64219, and does not teach iLang syntax unprompted."
+              "expected_behavior": "Calls ilang_runtime. The reply names the runtime version from the <ilang-runtime version=...> tag, for example 2026.10.31-6f17c3d64219."
             },
             {
               "description": "Validate iLang and suggest the right modifier",
@@ -71,7 +71,7 @@
               "description": "Return the published SOUL 2.0 document",
               "prompt": "Give me the iLang SOUL 2.0 document with its DOI.",
               "tools_triggered": "ilang_soul",
-              "expected_behavior": "Calls ilang_soul. Quotes the document as returned and gives version 2.0, DOI 10.5281/zenodo.23778215 and the sha256 9b22c7d5bbbcbca24db044cb5c9d2bb98b8e019b776a764e339b505d465a66f1."
+              "expected_behavior": "Calls ilang_soul. The reply gives version 2.0, DOI 10.5281/zenodo.23778215, the sha256 9b22c7d5bbbcbca24db044cb5c9d2bb98b8e019b776a764e339b505d465a66f1 and the document text returned by the tool."
             },
             {
               "description": "Check an engineering book",
