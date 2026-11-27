@@ -1,7 +1,8 @@
-# Bump the version in CITATION.cff (and in pyproject.toml, __init__.py and package.json,
-# which must agree) and push: this tags the release, Zenodo archives it from the release
-# webhook, and the packages go to PyPI (trusted publishing) and npm. Nothing runs when the
-# version is unchanged.
+# Bump the version in CITATION.cff (and in .zenodo.json, pyproject.toml, __init__.py, package.json
+# and the User-Agent strings of loader.py and index.js, which must agree) and push: the tests of
+# test.yml run first, then this tags the release, Zenodo archives it from the release webhook,
+# and the packages go to PyPI (trusted publishing) and npm. Nothing is tagged or published when
+# the version is unchanged or a test fails.
 name: Publish
 
 on:
@@ -11,7 +12,13 @@ on:
   workflow_dispatch:
 
 jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+    permissions:
+      contents: read
+
   release:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -22,17 +29,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Read the version and check every manifest agrees
+      - name: Read the version and check every place that carries it agrees
         id: read
         run: |
           v=$(sed -n 's/^version:[[:space:]]*"\{0,1\}\([^"[:space:]]*\)"\{0,1\}.*/\1/p' CITATION.cff | head -1)
+          zenodo=$(node -p "require('./.zenodo.json').version")
           py=$(sed -n 's/^version = "\(.*\)"/\1/p' python/pyproject.toml | head -1)
           init=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' python/ilang/__init__.py | head -1)
+          agent_py=$(sed -n 's/^AGENT = "ilang-loader-python\/\(.*\)"/\1/p' python/ilang/loader.py | head -1)
           js=$(node -p "require('./js/package.json').version")
-          echo "CITATION.cff $v | pyproject $py | __init__ $init | package.json $js"
-          if [ "$v" != "$py" ] || [ "$v" != "$init" ] || [ "$v" != "$js" ]; then
-            echo "versions disagree" >&2; exit 1
+          agent_js=$(sed -n 's/.*"User-Agent": "ilang-loader-js\/\([^"]*\)".*/\1/p' js/index.js | head -1)
+          echo "CITATION.cff $v | .zenodo.json $zenodo | pyproject $py | __init__ $init | loader.py $agent_py | package.json $js | index.js $agent_js"
+          if [ -z "$v" ]; then
+            echo "no version in CITATION.cff" >&2; exit 1
           fi
+          if [ "$zenodo" != "$v" ]; then            # Zenodo reads .zenodo.json before CITATION.cff
+            echo ".zenodo.json says $zenodo, CITATION.cff says $v: not tagged" >&2; exit 1
+          fi
+          for x in "$py" "$init" "$agent_py" "$js" "$agent_js"; do
+            if [ "$x" != "$v" ]; then echo "versions disagree" >&2; exit 1; fi
+          done
           echo "version=$v" >> "$GITHUB_OUTPUT"
           if git rev-parse -q --verify "refs/tags/v$v" >/dev/null; then
             echo "tagged=true" >> "$GITHUB_OUTPUT"

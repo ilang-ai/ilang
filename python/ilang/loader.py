@@ -15,7 +15,8 @@ OFFICIAL = ("https://runtime.ilang.app/", "https://raw.githubusercontent.com/ila
             "https://github.com/ilang-ai/", "https://ilang.ai/")
 TTL = 3600
 TIMEOUT = 10
-AGENT = "ilang-loader-python/1.1.4"
+RETRY = 60                                # seconds the sources are left alone after a check that failed
+AGENT = "ilang-loader-python/1.1.5"
 CHANNELS = ("latest",)
 _COMMIT = re.compile(r"[0-9a-f]{7,40}")
 _VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.\-]*")
@@ -44,7 +45,10 @@ def iso(ts):
 
 
 class Loader:
-    def __init__(self, runtime=RUNTIME, cache_dir=None, ttl=TTL, allow_custom_source=False, fallback=None):
+    def __init__(self, runtime=RUNTIME, cache_dir=None, ttl=TTL, allow_custom_source=False, fallback=None,
+                 timeout=TIMEOUT):
+        """timeout, in seconds, bounds the reading of the body and each wait for the connection and
+        the headers; timeoutMs, in milliseconds, bounds the whole request in JavaScript."""
         if fallback is None and runtime.rstrip("/") == RUNTIME:
             fallback = FALLBACK                   # the canon repository, when the runtime host is down
         for url in (runtime, fallback or runtime):
@@ -58,7 +62,14 @@ class Loader:
         self._custom = allow_custom_source
         self.cache = cache_dir or os.environ.get("ILANG_CACHE_DIR") or os.path.join(
             os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache"), "ilang")
+        if (self.runtime, self.fallback) != (RUNTIME, FALLBACK):
+            # A cache belongs to its source. Any other source keeps its files in a directory of its own,
+            # so the official loader never serves what another source left. JavaScript uses the same name.
+            source = "%s\n%s" % (self.runtime, self.fallback or "")
+            self.cache = os.path.join(self.cache, "sources", _sha(source.encode("utf-8"))[:16])
         self.ttl = ttl
+        self.timeout = timeout
+        self._failed = None                       # (time, error) of the last check that failed
         self.state = {"loaded": False, "channel": "latest", "source": "none", "version": None,
                       "source_commit": None, "last_check": None, "error": None}
         self._memo = {}
@@ -82,8 +93,17 @@ class Loader:
         if not url.startswith(OFFICIAL) and not (self._custom and url.startswith(self._origins)):
             raise LoaderError("refusing to fetch from %s" % url)
         req = urllib.request.Request(url, headers={"User-Agent": AGENT})
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-            return r.read()
+        deadline = time.monotonic() + self.timeout    # one limit for the body as a whole, as in JavaScript;
+        chunks = []                                   # urlopen's own timeout limits each wait, not their sum
+        with urllib.request.urlopen(req, timeout=self.timeout) as r:
+            read = getattr(r, "read1", r.read)        # read1 returns what has arrived instead of waiting for all
+            while True:
+                chunk = read(65536)
+                if not chunk:
+                    return b"".join(chunks)
+                chunks.append(chunk)
+                if time.monotonic() > deadline:
+                    raise TimeoutError("%s: no complete answer within %s seconds" % (url, self.timeout))
 
     def _commit_base(self, commit):
         """The runtime directory as it is at one commit. The runtime host serves only the current
@@ -163,6 +183,15 @@ class Loader:
         source = "remote" if checked or any(new for _, new in got) else "cache"
         return manifest, [data.decode("utf-8") for data, _ in got], source
 
+    def _last_known_good(self, names, version, commit):
+        """The verified copy on disk as (manifest, texts), or None. Never the network."""
+        try:
+            where = self._where(version, commit)
+            manifest = json.loads(self._read(*where, "manifest.json") or b"null")
+            return manifest, [self._get(manifest, n, where, False)[0].decode("utf-8") for n in names]
+        except Exception:
+            return None
+
     def load(self, extensions=(), version=None, commit=None, channel="latest", strict=False):
         """The runtime text, or None when nothing verified is available and strict is off.
 
@@ -188,38 +217,49 @@ class Loader:
         if hit and (version or commit or time.time() - hit[1] < self.ttl):
             self.state.update(hit[2])
             return hit[0], hit[2]["version"]
-        try:
-            manifest, texts, source = self._load(names, version, commit)
-            self.state["error"] = None
-        except _UnknownExtension as err:          # the caller's mistake, like a wrong channel
-            raise ValueError(str(err)) from None
-        except Exception as err:                  # network, hash or parse failure
-            self.state["error"] = "%s: %s" % (type(err).__name__, err)
-            if self.fallback and not commit:      # a commit is already read from the canon
-                try:
-                    manifest, texts, source = self._load(names, version, commit, self.fallback)
-                    self.state["error"] = None
-                except _UnknownExtension as err2:
-                    raise ValueError(str(err2)) from None
-                except Exception as err2:
-                    self.state["error"] += "; fallback %s: %s" % (type(err2).__name__, err2)
-        if self.state["error"] is not None:
-            try:                                  # Last Known Good, never the network
-                where = self._where(version, commit)
-                manifest = json.loads(self._read(*where, "manifest.json") or b"null")
-                texts = [self._get(manifest, n, where, False)[0].decode("utf-8") for n in names]
-                source = "cache"
-            except Exception:
-                if strict:
-                    raise LoaderError(self.state["error"])
-                self.state.update(loaded=False, source="none")
-                return None, None
+        latest = not version and not commit       # a pin on disk is served without the network anyway
+        failed = self._failed if latest else None
+        good = None
+        if failed and time.time() - failed[0] < min(RETRY, self.ttl):
+            # A check has just failed. While a verified copy is on disk it serves and the sources are left
+            # alone, so that sources which hang do not cost every call their timeouts.
+            good = self._last_known_good(names, version, commit)
+        if good is not None:
+            error = failed[1]
+        else:
+            try:
+                manifest, texts, source = self._load(names, version, commit)
+                error = None
+            except _UnknownExtension as err:      # the caller's mistake, like a wrong channel
+                raise ValueError(str(err)) from None
+            except Exception as err:              # network, hash or parse failure
+                error = "%s: %s" % (type(err).__name__, err)
+                if self.fallback and not commit:  # a commit is already read from the canon
+                    try:
+                        manifest, texts, source = self._load(names, version, commit, self.fallback)
+                        error = None
+                    except _UnknownExtension as err2:
+                        raise ValueError(str(err2)) from None
+                    except Exception as err2:
+                        error += "; fallback %s: %s" % (type(err2).__name__, err2)
+            if latest:
+                self._failed = None if error is None else (time.time(), error)
+            if error is not None:
+                good = self._last_known_good(names, version, commit)
+        self.state["error"] = error
+        if good is not None:
+            manifest, texts, source = good[0], good[1], "cache"
+        elif error is not None:
+            if strict:
+                raise LoaderError(error)
+            self.state.update(loaded=False, source="none")
+            return None, None
         # This load's own values, kept with its text: self.state is shared and may have been written since.
         loaded = {"loaded": True, "source": source, "version": manifest["version"],
                   "channel": "pinned" if version or commit else "latest",
                   "source_commit": manifest["source_commit"]}
         self.state.update(loaded, last_check=self._last_check() or None)
         text = "\n\n".join(texts)
-        if self.state["error"] is None:           # a fallback copy is re-checked next call
-            self._memo[key] = (text, time.time(), loaded)
+        if error is None:                         # a Last Known Good copy is not kept in memory: the sources
+            self._memo[key] = (text, time.time(), loaded)   # are asked again once RETRY seconds have passed
         return text, manifest["version"]

@@ -11,6 +11,7 @@ export const FALLBACK = "https://raw.githubusercontent.com/ilang-ai/ilang-spec/m
 const CANON = "https://raw.githubusercontent.com/ilang-ai/ilang-spec";                         // the canon at one commit
 const OFFICIAL = ["https://runtime.ilang.app/", "https://raw.githubusercontent.com/ilang-ai/", "https://github.com/ilang-ai/", "https://ilang.ai/"];
 const CHANNELS = ["latest"];
+const RETRY = 60;                                  // seconds the sources are left alone after a check that failed
 const COMMIT = /^[0-9a-f]{7,40}$/;
 const VERSION = /^[0-9A-Za-z][0-9A-Za-z.-]*$/;
 const MARKER = "<ilang-runtime";
@@ -41,8 +42,14 @@ export class Loader {
     this.custom = allowCustomSource;
     this.cache = cacheDir || process.env.ILANG_CACHE_DIR ||
       join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "ilang");
+    if (this.runtime !== RUNTIME || this.fallback !== FALLBACK) {
+      // A cache belongs to its source. Any other source keeps its files in a directory of its own,
+      // so the official loader never serves what another source left. Python uses the same name.
+      this.cache = join(this.cache, "sources", sha(`${this.runtime}\n${this.fallback || ""}`).slice(0, 16));
+    }
     this.ttl = ttl;
     this.timeoutMs = timeoutMs;
+    this.failed = null;                            // { at, error } of the last check that failed
     this.state = { loaded: false, channel: "latest", source: "none", version: null, sourceCommit: null,
       lastCheck: null, error: null };
     this.memo = new Map();
@@ -64,7 +71,7 @@ export class Loader {
     if (!OFFICIAL.some((p) => url.startsWith(p)) && !(this.custom && this.origins.some((o) => url.startsWith(o)))) {
       throw new LoaderError(`refusing to fetch from ${url}`);
     }
-    const res = await fetch(url, { headers: { "User-Agent": "ilang-loader-js/1.1.4" },
+    const res = await fetch(url, { headers: { "User-Agent": "ilang-loader-js/1.1.5" },
       signal: AbortSignal.timeout(this.timeoutMs) });
     if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);   // not a LoaderError: #load retries those with a fresh manifest
     return Buffer.from(await res.arrayBuffer());
@@ -179,45 +186,66 @@ export class Loader {
       Object.assign(this.state, hit.state);
       return [hit.text, hit.state.version];
     }
-    let manifest, texts, source;
-    try {
-      [manifest, texts, source] = await this.#load(names, version, commit);
-      this.state.error = null;
-    } catch (err) {
-      if (err instanceof UnknownExtension) throw new Error(err.message);   // the caller's mistake, like a wrong channel
-      this.state.error = `${err.name}: ${err.message}`;
-      if (this.fallback && !commit) {                // a commit is already read from the canon
-        try {
-          [manifest, texts, source] = await this.#load(names, version, commit, this.fallback);
-          this.state.error = null;
-        } catch (err2) {
-          if (err2 instanceof UnknownExtension) throw new Error(err2.message);
-          this.state.error += `; fallback ${err2.name}: ${err2.message}`;
+    let manifest, texts, source, error, good = null;
+    const latest = !version && !commit;            // a pin on disk is served without the network anyway
+    const failed = latest ? this.failed : null;
+    if (failed && Date.now() / 1000 - failed.at < Math.min(RETRY, this.ttl)) {
+      // A check has just failed. While a verified copy is on disk it serves and the sources are left
+      // alone, so that sources which hang do not cost every call their timeouts.
+      good = await this.#lastKnownGood(names, version, commit);
+    }
+    if (good) {
+      error = failed.error;
+    } else {
+      try {
+        [manifest, texts, source] = await this.#load(names, version, commit);
+        error = null;
+      } catch (err) {
+        if (err instanceof UnknownExtension) throw new Error(err.message);   // the caller's mistake, like a wrong channel
+        error = `${err.name}: ${err.message}`;
+        if (this.fallback && !commit) {              // a commit is already read from the canon
+          try {
+            [manifest, texts, source] = await this.#load(names, version, commit, this.fallback);
+            error = null;
+          } catch (err2) {
+            if (err2 instanceof UnknownExtension) throw new Error(err2.message);
+            error += `; fallback ${err2.name}: ${err2.message}`;
+          }
         }
       }
+      if (latest) this.failed = error === null ? null : { at: Date.now() / 1000, error };
+      if (error !== null) good = await this.#lastKnownGood(names, version, commit);
     }
-    if (this.state.error !== null) {
-      try {                                          // Last Known Good, never the network
-        const where = Loader.#where(version, commit);
-        manifest = JSON.parse((await this.#read(...where, "manifest.json")) || "null");
-        texts = [];
-        for (const n of names) texts.push((await this.#get(manifest, n, where, false))[0].toString("utf8"));
-        source = "cache";
-      } catch {
-        if (strict) throw new LoaderError(this.state.error);
-        Object.assign(this.state, { loaded: false, source: "none" });
-        return [null, null];
-      }
+    this.state.error = error;
+    if (good) {
+      [manifest, texts, source] = [good[0], good[1], "cache"];
+    } else if (error !== null) {
+      if (strict) throw new LoaderError(error);
+      Object.assign(this.state, { loaded: false, source: "none" });
+      return [null, null];
     }
     Object.assign(this.state, { loaded: true, source, version: manifest.version,
       channel: version || commit ? "pinned" : "latest",
       sourceCommit: manifest.source_commit, lastCheck: (await this.#lastCheck()) || null });
     const text = texts.join("\n\n");
-    if (this.state.error === null) {
-      const { loaded, channel: ch, version: v, sourceCommit } = this.state;
+    if (error === null) {                            // a Last Known Good copy is not kept in memory: the sources
+      const { loaded, channel: ch, version: v, sourceCommit } = this.state;   // are asked again once RETRY seconds have passed
       this.memo.set(key, { text, at: Date.now() / 1000, state: { loaded, channel: ch, source, version: v, sourceCommit } });
     }
     return [text, manifest.version];
+  }
+
+  // The verified copy on disk as [manifest, texts], or null. Never the network.
+  async #lastKnownGood(names, version, commit) {
+    try {
+      const where = Loader.#where(version, commit);
+      const manifest = JSON.parse((await this.#read(...where, "manifest.json")) || "null");
+      const texts = [];
+      for (const n of names) texts.push((await this.#get(manifest, n, where, false))[0].toString("utf8"));
+      return [manifest, texts];
+    } catch {
+      return null;
+    }
   }
 }
 
@@ -270,7 +298,10 @@ export async function wrap(messages, options = {}) {
   return [{ role: "system", content: block }, ...list];
 }
 
-/** What is loaded: version, commit, where it came from, cache age and any last error. */
+/** What is loaded: version, commit, where it came from, cache age and any last error.
+ * commit is the canon commit the loaded bundle was built from. It is not a value for the commit
+ * option: the bundle built from a commit is committed after it, so pinning that commit loads the
+ * build before. To load the same runtime again, pin version with the version reported here. */
 export function status() {
   const st = current().state;
   const s = { brand: "iLang", ...st, commit: st.sourceCommit, lastCheck: iso(st.lastCheck) };

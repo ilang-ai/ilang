@@ -30,6 +30,8 @@ def post(url, body, headers):
             return r.status, json.load(r)
     except urllib.error.HTTPError as err:
         return err.code, {"error": err.read().decode("utf-8", "replace")[:300]}
+    except OSError as err:                        # no connection, or no answer in time
+        return 0, {"error": str(err)}
 
 
 def main(argv):
@@ -58,7 +60,7 @@ def main(argv):
         ok = status == 200 and bool(text.strip())
         failed += not ok
         lines = [l for l in text.strip().splitlines() if l.strip() and not l.startswith("```")]
-        first = lines[0][:160] if lines else reply.get("error", "")[:160]
+        first = lines[0][:160] if lines else str(reply.get("error", ""))[:160]   # a gateway may send an object
         print("%-4s %-34s HTTP %s  %5.1fs  %s" % ("ok" if ok else "FAIL", model, status, time.time() - started, first))
     s = ilang.status()
     print("runtime %s (commit %s, %s)%s" % (s["version"], s["commit"], s["source"],

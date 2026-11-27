@@ -3,6 +3,7 @@ name: Test
 on:
   push:
   pull_request:
+  workflow_call:          # Publish runs these first and releases only when they pass
 
 jobs:
   python:
@@ -39,3 +40,10 @@ jobs:
         env:
           ILANG_NETWORK_TESTS: "1"
         run: node --test test/ilang.test.js
+
+  copies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The Codex and Hermes packages carry the same skill file
+        run: cmp hermes/skills/ilang/SKILL.md plugins/ilang/skills/ilang/SKILL.md

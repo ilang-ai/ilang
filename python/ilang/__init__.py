@@ -9,17 +9,17 @@ hour, and falls back to the last verified copy when the network is unavailable.
 """
 import time
 
-from .injector import block, inject
+from .injector import _has_runtime, block, inject
 from .loader import Loader, LoaderError, iso
 
-__version__ = "1.1.4"
+__version__ = "1.1.5"
 __all__ = ["load", "wrap", "system", "status", "configure", "Loader", "LoaderError"]
 
 _loader = None
 
 
 def configure(**options):
-    """Replace the default loader, e.g. configure(cache_dir=..., ttl=...)."""
+    """Replace the default loader, e.g. configure(cache_dir=..., ttl=..., timeout=...)."""
     global _loader
     _loader = Loader(**options)
     return _loader
@@ -53,12 +53,20 @@ def wrap(messages, extensions=(), version=None, commit=None, channel="latest", s
     of the application's system message, for providers that accept only one. The user's
     messages are never modified, and the runtime is added only once, so wrapping every turn
     of a conversation is safe."""
+    messages = list(messages)
+    if any(_has_runtime(m) for m in messages):
+        return messages                           # already wrapped: nothing is loaded, as in JavaScript
     text = system(extensions, version, commit, channel, strict)
     return inject(messages, text or None, merge_system=merge_system)
 
 
 def status():
-    """What is loaded: version, commit, where it came from, cache age and any last error."""
+    """What is loaded: version, commit, where it came from, cache age and any last error.
+
+    commit is the canon commit the loaded bundle was built from. It is not a value for
+    commit=: the bundle built from a commit is committed after it, so commit= with that
+    value loads the build before. To load the same runtime again, pin version= with the
+    version reported here."""
     state = _default().state
     s = dict(state, brand="iLang", commit=state["source_commit"], last_check=iso(state["last_check"]))
     if state.get("last_check"):

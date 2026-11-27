@@ -3,15 +3,20 @@
     python -m unittest discover -s tests          (from the python/ directory)
     ILANG_NETWORK_TESTS=1 ...                     also checks the real official runtime
 """
+import contextlib
 import hashlib
 import http.server
+import importlib.util
+import io
 import json
 import os
 import shutil
 import sys
 import tempfile
 import threading
+import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import ilang  # noqa: E402
@@ -83,8 +88,8 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual(ld.load(), "CORE ONE")
         self.assertEqual(ld.state["source"], "remote")
         self.assertEqual(ld.state["version"], "v1")
-        self.assertTrue(os.path.exists(os.path.join(self.cache, "latest", "core.md")))
-        with open(os.path.join(self.cache, "state.json"), encoding="utf-8") as f:
+        self.assertTrue(os.path.exists(os.path.join(ld.cache, "latest", "core.md")))
+        with open(os.path.join(ld.cache, "state.json"), encoding="utf-8") as f:
             state = json.load(f)
         self.assertEqual((state["active_version"], state["status"], state["source"]), ("v1", "ok", "remote"))
 
@@ -117,7 +122,7 @@ class LoaderTests(unittest.TestCase):
         ld = self.loader(ttl=0)
         self.assertEqual(ld.load(), "CORE ONE")
         self.assertIn("sha256", ld.state["error"])
-        with open(os.path.join(self.cache, "latest", "core.md"), encoding="utf-8") as f:
+        with open(os.path.join(ld.cache, "latest", "core.md"), encoding="utf-8") as f:
             self.assertEqual(f.read(), "CORE ONE")
 
     def test_a_new_version_replaces_the_cache(self):
@@ -199,13 +204,86 @@ class LoaderTests(unittest.TestCase):
                 with self.subTest(file=name, damage=damage):
                     shutil.rmtree(self.cache, ignore_errors=True)
                     self.loader().load()
-                    with open(os.path.join(self.cache, name), "wb") as f:
-                        f.write(damage)
                     ld = self.loader()
+                    with open(os.path.join(ld.cache, name), "wb") as f:
+                        f.write(damage)
                     self.assertEqual(ld.load(), "CORE ONE")
                     self.assertEqual((ld.state["source"], ld.state["error"]), ("remote", None))
-                    with open(os.path.join(self.cache, name), encoding="utf-8") as f:
+                    with open(os.path.join(ld.cache, name), encoding="utf-8") as f:
                         json.load(f)                          # written again
+
+    def test_a_cache_is_tied_to_its_source(self):
+        ld = self.loader()
+        self.assertEqual(ld.load(), "CORE ONE")               # one source fills the cache directory
+        gone = FakeRuntime()
+        gone.stop()                                           # another source, which does not answer
+        other = Loader(runtime=gone.base, cache_dir=self.cache, allow_custom_source=True)
+        self.assertIsNone(other.load())                       # what the first source left is not its copy
+        official = Loader(cache_dir=self.cache)
+        self.assertEqual(official.cache, self.cache)          # the official sources keep the directory itself,
+        self.assertFalse(os.path.exists(os.path.join(official.cache, "latest")))   # and nothing else writes there
+        named = Loader(runtime="https://mirror.example/main/runtime", cache_dir=self.cache, allow_custom_source=True)
+        self.assertEqual(named.cache, os.path.join(self.cache, "sources", "75810265f2ea2d84"))   # as in JavaScript
+
+    def test_the_timeout_is_for_the_whole_request(self):
+        body = b"x" * 100                                     # ten seconds at one byte every 0.1 s
+
+        class Drip(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                try:
+                    for i in range(len(body)):
+                        self.wfile.write(body[i:i + 1])
+                        self.wfile.flush()
+                        time.sleep(0.1)
+                except OSError:                               # the loader has hung up
+                    pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Drip)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            ld = Loader(runtime="http://127.0.0.1:%d/main/runtime" % server.server_address[1],
+                        cache_dir=self.cache, allow_custom_source=True, timeout=0.5)
+            started = time.time()
+            self.assertIsNone(ld.load())
+            self.assertLess(time.time() - started, 3)
+            self.assertIn("TimeoutError", ld.state["error"])
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_after_a_failed_check_the_sources_are_left_alone_for_a_while(self):
+        ld = self.loader()
+        ld.load()                                             # a verified copy is on disk
+        with open(os.path.join(ld.cache, "state.json"), "w", encoding="utf-8") as f:
+            json.dump({"last_check": 1}, f)                   # and the hourly check is due
+        self.remote.publish("v2", {"core": "CORE TWO", "media": "MEDIA TWO"}, corrupt="core")
+        ld = self.loader()
+        asked = []
+        fetch = ld._fetch
+        ld._fetch = lambda url: asked.append(url) or fetch(url)
+        self.assertEqual(ld.load(), "CORE ONE")
+        self.assertEqual(len(asked), 2)                       # the manifest, and the bundle that failed its check
+        self.assertEqual(ld.load(), "CORE ONE")               # the copy on disk serves and the source is not asked
+        self.assertEqual(len(asked), 2)
+        self.assertEqual(ld.state["source"], "cache")
+        self.assertIn("sha256", ld.state["error"])
+        self.assertIsNone(ld.load(extensions=["media"]))      # no verified copy of this one: the source is asked
+        self.assertEqual(len(asked), 4)
+        self.assertEqual(ld.load(version="v2"), "CORE TWO")    # a pin is loaded as usual,
+        self.assertIsNone(ld.state["error"])
+        self.assertEqual(ld.load(), "CORE ONE")               # and does not end the wait
+        self.assertEqual(len(asked), 6)
+        self.remote.publish("v2", {"core": "CORE TWO", "media": "MEDIA TWO"})
+        self.assertEqual(ld.load(), "CORE ONE")               # still inside the wait
+        ld._failed = (0, ld._failed[1])                       # the wait is over
+        self.assertEqual(ld.load(), "CORE TWO")
+        self.assertIsNone(ld.state["error"])
 
 
 class InjectorTests(unittest.TestCase):
@@ -250,6 +328,16 @@ class InjectorTests(unittest.TestCase):
         once = ilang.wrap([{"role": "user", "content": "hi"}])
         again = ilang.wrap(once + [{"role": "assistant", "content": "ok"}, {"role": "user", "content": "next"}])
         self.assertEqual(sum("<ilang-runtime" in m["content"] for m in again), 1)
+
+    def test_messages_that_carry_the_runtime_are_returned_without_loading(self):
+        once = ilang.wrap([{"role": "user", "content": "hi"}])
+        self.remote.stop()
+        empty = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, empty, ignore_errors=True)
+        ilang.configure(runtime=self.remote.base, cache_dir=empty, allow_custom_source=True)
+        self.assertEqual(ilang.wrap(once, strict=True), once)   # nothing is loaded, so nothing can fail
+        with self.assertRaises(LoaderError):
+            ilang.wrap([{"role": "user", "content": "hi"}], strict=True)
 
     def test_content_parts_are_recognised(self):
         msgs = [{"role": "system", "content": [{"type": "text", "text": "<ilang-runtime version=x>"}]}]
@@ -297,6 +385,69 @@ class InjectorTests(unittest.TestCase):
         del ld._memo[(("core",), None, None)]                 # latest is loaded afresh, as it is after the TTL
         ilang.system()
         self.assertIn('<ilang-runtime version="v2">\nCORE TWO', ilang.system())   # now served from memory
+
+
+EXAMPLE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "examples", "check_providers.py")
+
+
+@unittest.skipUnless(os.path.exists(EXAMPLE), "examples/ is not in this copy")
+class ExampleTests(unittest.TestCase):
+    """examples/check_providers.py against a local gateway."""
+
+    def setUp(self):
+        self.remote = FakeRuntime()
+        self.remote.publish("v1", {"core": "CORE ONE"})
+        self.cache = tempfile.mkdtemp()
+        ilang.configure(runtime=self.remote.base, cache_dir=self.cache, allow_custom_source=True)
+
+        class Gateway(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                model = json.loads(self.rfile.read(int(self.headers["Content-Length"])))["model"]
+                reply = ({"error": {"message": "provider returned an error", "code": 502}} if model == "model-a" else
+                         {"choices": [{"message": {"content": "[READ:@LOCAL|path=report.csv]=>[CNT]=>[OUT]"}}]})
+                data = json.dumps(reply).encode()
+                self.send_response(200)                       # some gateways report an error this way
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+        self.gateway = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Gateway)
+        threading.Thread(target=self.gateway.serve_forever, daemon=True).start()
+        spec = importlib.util.spec_from_file_location("check_providers", EXAMPLE)
+        self.example = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.example)
+
+    def tearDown(self):
+        self.gateway.shutdown()
+        self.gateway.server_close()
+        self.remote.stop()
+        shutil.rmtree(self.cache, ignore_errors=True)
+
+    def check(self, base, models):
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"ILANG_CHECK_BASE_URL": base, "ILANG_CHECK_API_KEY": "test-key"}):
+            with contextlib.redirect_stdout(out):
+                code = self.example.main(models)
+        return code, out.getvalue().splitlines()
+
+    def test_an_error_object_with_http_200_does_not_stop_the_run(self):
+        code, lines = self.check("http://127.0.0.1:%d/v1" % self.gateway.server_address[1], ["model-a", "model-b"])
+        self.assertEqual(code, 1)
+        self.assertRegex(lines[0], r"^FAIL model-a +HTTP 200 .*provider returned an error")
+        self.assertRegex(lines[1], r"^ok +model-b +HTTP 200 .*\[READ:@LOCAL")
+        self.assertRegex(lines[2], r"^runtime v1 ")
+
+    def test_a_gateway_that_does_not_answer_is_reported_as_a_failure(self):
+        base = "http://127.0.0.1:%d/v1" % self.gateway.server_address[1]
+        self.gateway.shutdown()
+        self.gateway.server_close()
+        code, lines = self.check(base, ["model-a"])
+        self.assertEqual(code, 1)
+        self.assertRegex(lines[0], r"^FAIL model-a +HTTP 0 ")
 
 
 @unittest.skipUnless(os.environ.get("ILANG_NETWORK_TESTS"), "set ILANG_NETWORK_TESTS=1")

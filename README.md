@@ -71,7 +71,7 @@ Providers that take the system prompt as a separate field, such as Anthropic and
 
 1. Reads the official [runtime manifest](https://runtime.ilang.app/manifest.json) at most once an hour. If the runtime host does not answer, it reads the same files from the canon repository on GitHub.
 2. Downloads a bundle only when its sha256 changes, and accepts it only if the sha256 matches.
-3. Keeps the last verified copy on disk. If the network is down, it keeps working from that copy.
+3. Keeps the last verified copy on disk. If the network is down, it keeps working from that copy; after a check that fails it serves that copy for a minute without asking the sources, so sources that hang do not hold up every request.
 4. Adds the runtime as the first system message, once. Your own system prompt and your users' messages stay exactly as they were, so wrapping every turn of a conversation is safe.
 
 The runtime itself is generated in the canon repository from the specification files and never edited by hand, so there is one source of truth and no second copy of the rules anywhere in this package.
@@ -95,11 +95,12 @@ The JavaScript API takes the same options as an object: `wrap(messages, { extens
 | Update check | once per hour (`ttl=3600`) |
 | Channel | `latest`; pin instead with `version=` or `commit=`, both immutable and served from disk after the first load |
 | System messages | the runtime is its own first system message; `merge_system=True` puts it at the start of yours instead |
-| Cache | `~/.cache/ilang`, or `ILANG_CACHE_DIR` |
+| Cache | `~/.cache/ilang`, or `ILANG_CACHE_DIR`; a loader given other sources keeps its files in a subdirectory of its own |
+| Request timeout | 10 seconds: `configure(timeout=10)`, in JavaScript `configure({ timeoutMs: 10000 })`. In JavaScript it bounds the whole request; in Python it bounds the reading of the body and each wait for the connection and the headers |
 | No network, no cache | fail open: messages are sent unchanged; `strict=True` raises instead |
 | Sources | official only: `runtime.ilang.app`, `raw.githubusercontent.com/ilang-ai/`, `github.com/ilang-ai/`, `ilang.ai`. A custom source needs `allow_custom_source=True` in code; nothing in a prompt can change it |
 
-**Size.** The core runtime is about 18,600 tokens (cl100k): the working text of the three core documents, with version histories, the formal declaration grammar and most worked examples left out. Its header lists what was left out and points the model to the full text, [ilang.ai/runtime/full](https://ilang.ai/runtime/full), for anything it is unsure about. The media extension adds about 18,000 tokens. Every wrapped request carries the runtime, so turn on your provider's prompt caching where it has one.
+**Size.** As of runtime version 2026.11.26-16d02f108a96 the core runtime is 27,498 tokens (cl100k_base, counted on 2026-11-27): the working text of the three core documents, with version histories, the formal declaration grammar and most worked examples left out. Its header lists what was left out and points the model to the full text, [ilang.ai/runtime/full](https://ilang.ai/runtime/full), for anything it is unsure about. The loader has no mode that sends the full text alone: `extensions=["full"]` sends the full text after the core, and the full text repeats the core. At the same runtime version the media extension adds 17,994 tokens. Every wrapped request carries the runtime, so turn on your provider's prompt caching where it has one.
 
 ## Checked with real models
 
