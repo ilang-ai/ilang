@@ -11,7 +11,9 @@ def block(text, version):
 
 
 def _has_runtime(message):
-    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(message, dict) or message.get("role") != "system":
+        return False                              # wrap() writes the runtime into a system message only
+    content = message.get("content")
     if isinstance(content, str):
         return MARKER in content
     if isinstance(content, list):                 # content parts: [{"type": "text", "text": ...}]

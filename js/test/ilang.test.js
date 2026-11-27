@@ -156,6 +156,33 @@ describe("loader", () => {
     assert.deepEqual([ld.state.source, ld.state.error], ["remote", null]);
     assert.equal(await ld.load({ version: "v1" }), "CORE ONE");
   });
+  test("a cached manifest older than the runtime is fetched again", async () => {
+    await loader().load();                           // core and the v1 manifest are in the cache
+    remote.publish("v2", { core: "CORE TWO", media: "MEDIA TWO" });
+    const ld = loader();                             // inside the TTL, so the cached manifest is tried first
+    assert.equal(await ld.load({ extensions: ["media"] }), "CORE TWO\n\nMEDIA TWO");
+    assert.deepEqual([ld.state.version, ld.state.error], ["v2", null]);
+  });
+  test("an extension the runtime does not have is refused", async () => {
+    await assert.rejects(loader().load({ extensions: ["video"] }), /"video" is not available.*media/);
+    await loader().load();                           // the same with the core already in the cache
+    await assert.rejects(loader().load({ extensions: ["video"] }), /"video" is not available/);
+    await remote.stop();                             // with no source to ask, the loader fails open as before
+    assert.equal(await loader().load({ extensions: ["video"] }), null);
+  });
+  test("a damaged cache file counts as no file", async () => {
+    for (const name of ["state.json", join("latest", "manifest.json")]) {
+      for (const damage of ["", '{"version": "v1", "bund']) {
+        rmSync(cache, { recursive: true, force: true });
+        await loader().load();
+        writeFileSync(join(cache, name), damage);
+        const ld = loader();
+        assert.equal(await ld.load(), "CORE ONE", `${name} holding ${JSON.stringify(damage)}`);
+        assert.deepEqual([ld.state.source, ld.state.error], ["remote", null]);
+        JSON.parse(readFileSync(join(cache, name), "utf8"));   // written again
+      }
+    }
+  });
 });
 
 describe("wrap", () => {
@@ -192,6 +219,15 @@ describe("wrap", () => {
     const again = await ilang.wrap([...once, { role: "assistant", content: "ok" }, { role: "user", content: "next" }]);
     assert.equal(again.filter((m) => String(m.content).includes("<ilang-runtime")).length, 1);
   });
+  test("the tag quoted outside a system message does not switch the runtime off", async () => {
+    const msgs = [{ role: "user", content: 'what is <ilang-runtime version="v1">?' },
+      { role: "assistant", content: [{ type: "text", text: "The <ilang-runtime tag opens it." }] },
+      { role: "user", content: "next" }];
+    const out = await ilang.wrap(msgs);
+    assert.equal(out[0].role, "system");
+    assert.match(out[0].content, /CORE ONE/);
+    assert.deepEqual(out.slice(1), msgs);
+  });
   test("fail-open returns the messages unchanged", async () => {
     await remote.stop();
     ilang.configure({ runtime: remote.base, cacheDir: mkdtempSync(join(tmpdir(), "ilang-empty-")), allowCustomSource: true });
@@ -206,6 +242,14 @@ describe("wrap", () => {
     assert.deepEqual([s.brand, s.version, s.commit, s.channel], ["iLang", "v1", "c0ffeev1", "latest"]);
     assert.match(s.lastCheck, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
     assert.ok(s.ageSeconds >= 0);
+  });
+  test("the version in the tag is the version of the text under it", async () => {
+    remote.publish("v2", { core: "CORE TWO", media: "MEDIA TWO" });
+    await ilang.system();
+    await ilang.system({ version: "v1" });           // both are now in the loader's memory
+    const [latest, pinned] = await Promise.all([ilang.system(), ilang.system({ version: "v1" })]);   // two calls in flight
+    assert.match(latest, /<ilang-runtime version="v2">\nCORE TWO/);
+    assert.match(pinned, /<ilang-runtime version="v1">\nCORE ONE/);
   });
 });
 

@@ -12,7 +12,7 @@ import time
 from .injector import block, inject
 from .loader import Loader, LoaderError, iso
 
-__version__ = "1.1.3"
+__version__ = "1.1.4"
 __all__ = ["load", "wrap", "system", "status", "configure", "Loader", "LoaderError"]
 
 _loader = None
@@ -32,16 +32,17 @@ def _default():
 def load(extensions=(), version=None, commit=None, channel="latest", strict=False):
     """Load the runtime now. Returns its text, or None if nothing verified is available.
 
-    version= pins a runtime version such as "2026.09.22-a69b7d69b3a6"; commit= pins the
-    runtime as it is at one commit of the canon repository."""
+    version= pins a runtime version such as "2026.11.19-105ffdc14ac2"; commit= pins the
+    runtime as it is at one commit of the canon repository. With a pin, pass strict=True so
+    that a pin that cannot be loaded raises."""
     return _default().load(extensions=extensions, version=version, commit=commit, channel=channel,
                            strict=strict)
 
 
 def system(extensions=(), version=None, commit=None, channel="latest", strict=False):
     """The runtime as a system-prompt string, or "" when it could not be loaded."""
-    text = load(extensions, version, commit, channel, strict)
-    return block(text, _default().state["version"]) if text is not None else ""
+    text, loaded_version = _default()._text_and_version(extensions, version, commit, channel, strict)
+    return block(text, loaded_version) if text is not None else ""
 
 
 def wrap(messages, extensions=(), version=None, commit=None, channel="latest", strict=False,

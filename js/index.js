@@ -20,6 +20,7 @@ const PREAMBLE =
   "Use it to interpret, structure, judge, execute, verify, and communicate where applicable.";
 
 export class LoaderError extends Error {}
+class UnknownExtension extends Error {}            // load() throws it to the caller as an Error, like a wrong channel
 
 const sha = (buf) => createHash("sha256").update(buf).digest("hex");
 const iso = (seconds) => (seconds ? new Date(seconds * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") : null);
@@ -63,9 +64,9 @@ export class Loader {
     if (!OFFICIAL.some((p) => url.startsWith(p)) && !(this.custom && this.origins.some((o) => url.startsWith(o)))) {
       throw new LoaderError(`refusing to fetch from ${url}`);
     }
-    const res = await fetch(url, { headers: { "User-Agent": "ilang-loader-js/1.1.3" },
+    const res = await fetch(url, { headers: { "User-Agent": "ilang-loader-js/1.1.4" },
       signal: AbortSignal.timeout(this.timeoutMs) });
-    if (!res.ok) throw new LoaderError(`${url}: HTTP ${res.status}`);
+    if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);   // not a LoaderError: #load retries those with a fresh manifest
     return Buffer.from(await res.arrayBuffer());
   }
 
@@ -81,8 +82,12 @@ export class Loader {
   async #lastCheck() {
     const raw = await this.#read("state.json");
     if (!raw) return 0;
-    const s = JSON.parse(raw);                     // the Python loader writes last_check
-    return s.lastCheck || s.last_check || 0;
+    try {
+      const s = JSON.parse(raw);                   // the Python loader writes last_check
+      return s.lastCheck || s.last_check || 0;
+    } catch {                                      // a damaged file counts as no file
+      return 0;
+    }
   }
 
   static #where(version, commit) {
@@ -91,6 +96,10 @@ export class Loader {
 
   async #get(manifest, name, where, remote, base) {
     const meta = manifest.bundles[name];
+    if (!meta && name !== "core") {
+      throw new UnknownExtension(`extension ${JSON.stringify(name)} is not available; use an array of the names ` +
+        `this runtime has: ${Object.keys(manifest.bundles).filter((b) => b !== "core").sort().join(", ")}`);
+    }
     if (!meta) throw new LoaderError(`the runtime has no bundle named ${name}`);
     const cached = await this.#read(...where, `${name}.md`);
     if (cached && sha(cached) === meta.sha256) return [cached, false];
@@ -108,7 +117,8 @@ export class Loader {
     const where = Loader.#where(version, commit);
     const pinned = Boolean(version || commit);
     const cached = await this.#read(...where, "manifest.json");
-    let manifest = cached ? JSON.parse(cached) : null;
+    let manifest = null;                           // a damaged file counts as no file: it is fetched again
+    try { manifest = cached ? JSON.parse(cached) : null; } catch {}
     let checked = false;
     const sourceDir = runtime || this.runtime;
     const base = commit ? this.#commitBase(commit) : version ? `${sourceDir}/versions/${version}` : sourceDir;
@@ -116,8 +126,21 @@ export class Loader {
       manifest = JSON.parse(await this.#fetch(`${base}/manifest.json`));
       checked = true;
     }
-    const got = [];
-    for (const n of names) got.push(await this.#get(manifest, n, where, true, base));
+    const getAll = async () => {
+      const all = [];
+      for (const n of names) all.push(await this.#get(manifest, n, where, true, base));
+      return all;
+    };
+    let got;
+    try {
+      got = await getAll();
+    } catch (err) {
+      if (checked || !(err instanceof LoaderError || err instanceof UnknownExtension)) throw err;
+      // The manifest came from the cache and may be older than the runtime: fetch it once.
+      manifest = JSON.parse(await this.#fetch(`${base}/manifest.json`));
+      checked = true;
+      got = await getAll();
+    }
     for (let i = 0; i < names.length; i++) {         // write only once everything has verified
       if (got[i][1]) await this.#write(got[i][0], ...where, `${names[i]}.md`);
     }
@@ -136,31 +159,39 @@ export class Loader {
   /** The runtime text, or null when nothing verified is available and strict is off.
    * version or commit pins an exact runtime; both are immutable, so a pinned runtime is fetched
    * once and then served from disk. */
-  async load({ extensions = [], version = null, commit = null, channel = "latest", strict = false } = {}) {
+  async load(options) {
+    return (await this._textAndVersion(options))[0];
+  }
+
+  // load(), with the version of the text it returns. A caller that labels the text takes the
+  // version from here: this.state is shared, and another call may have written it since.
+  async _textAndVersion({ extensions = [], version = null, commit = null, channel = "latest", strict = false } = {}) {
     if (!CHANNELS.includes(channel)) {
       throw new Error(`channel ${JSON.stringify(channel)} is not available; use "latest", or pin with version or commit`);
     }
     if (version && commit) throw new Error("pin with version or commit, not both");
     if (commit !== null && !COMMIT.test(commit)) throw new Error("commit must be 7 to 40 lowercase hex characters");
-    if (version !== null && !VERSION.test(version)) throw new Error("version must look like 2026.09.22-a69b7d69b3a6");
+    if (version !== null && !VERSION.test(version)) throw new Error("version must look like 2026.11.19-105ffdc14ac2");
     const names = ["core", ...extensions.filter((e) => e !== "core")];
     const key = JSON.stringify([names, version, commit]);
     const hit = this.memo.get(key);
     if (hit && (version || commit || Date.now() / 1000 - hit.at < this.ttl)) {
       Object.assign(this.state, hit.state);
-      return hit.text;
+      return [hit.text, hit.state.version];
     }
     let manifest, texts, source;
     try {
       [manifest, texts, source] = await this.#load(names, version, commit);
       this.state.error = null;
     } catch (err) {
+      if (err instanceof UnknownExtension) throw new Error(err.message);   // the caller's mistake, like a wrong channel
       this.state.error = `${err.name}: ${err.message}`;
       if (this.fallback && !commit) {                // a commit is already read from the canon
         try {
           [manifest, texts, source] = await this.#load(names, version, commit, this.fallback);
           this.state.error = null;
         } catch (err2) {
+          if (err2 instanceof UnknownExtension) throw new Error(err2.message);
           this.state.error += `; fallback ${err2.name}: ${err2.message}`;
         }
       }
@@ -175,7 +206,7 @@ export class Loader {
       } catch {
         if (strict) throw new LoaderError(this.state.error);
         Object.assign(this.state, { loaded: false, source: "none" });
-        return null;
+        return [null, null];
       }
     }
     Object.assign(this.state, { loaded: true, source, version: manifest.version,
@@ -186,12 +217,12 @@ export class Loader {
       const { loaded, channel: ch, version: v, sourceCommit } = this.state;
       this.memo.set(key, { text, at: Date.now() / 1000, state: { loaded, channel: ch, source, version: v, sourceCommit } });
     }
-    return text;
+    return [text, manifest.version];
   }
 }
 
 const hasRuntime = (m) => {
-  const c = m && m.content;
+  const c = m && m.role === "system" && m.content;   // wrap() writes the runtime into a system message only
   if (typeof c === "string") return c.includes(MARKER);
   if (Array.isArray(c)) return c.some((p) => p && String(p.text ?? "").includes(MARKER));
   return false;
@@ -212,9 +243,9 @@ export const load = (options) => current().load(options);
 
 /** The runtime as a system-prompt string, or "" when it could not be loaded. */
 export async function system(options) {
-  const text = await load(options);
+  const [text, version] = await current()._textAndVersion(options);
   if (text === null) return "";
-  return `${PREAMBLE}\n\n<ilang-runtime version="${current().state.version}">\n${text}\n</ilang-runtime>`;
+  return `${PREAMBLE}\n\n<ilang-runtime version="${version}">\n${text}\n</ilang-runtime>`;
 }
 
 /** Messages with the iLang runtime in front. The runtime is the first system message; with

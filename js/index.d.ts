@@ -5,7 +5,8 @@ export declare class LoaderError extends Error {}
 export interface LoadOptions {
   /** Extra bundles besides the core, e.g. ["media"] for image, video and audio work. */
   extensions?: string[];
-  /** Pin an exact runtime version for reproducible runs, e.g. "2026.09.22-a69b7d69b3a6". */
+  /** Pin an exact runtime version for reproducible runs, e.g. "2026.11.19-105ffdc14ac2". Set strict
+   * with a pin, so that a pin that cannot be loaded throws. */
   version?: string | null;
   /** Pin the runtime as it is at one commit of the canon repository (7 to 40 hex characters). */
   commit?: string | null;

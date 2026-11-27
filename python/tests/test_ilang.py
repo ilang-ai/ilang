@@ -175,6 +175,38 @@ class LoaderTests(unittest.TestCase):
         self.assertEqual((ld.state["source"], ld.state["error"]), ("remote", None))
         self.assertEqual(ld.load(version="v1"), "CORE ONE")
 
+    def test_a_cached_manifest_older_than_the_runtime_is_fetched_again(self):
+        self.loader().load()                                  # core and the v1 manifest are in the cache
+        self.remote.publish("v2", {"core": "CORE TWO", "media": "MEDIA TWO"})
+        ld = self.loader()                                    # inside the TTL, so the cached manifest is tried first
+        self.assertEqual(ld.load(extensions=["media"]), "CORE TWO\n\nMEDIA TWO")
+        self.assertEqual((ld.state["version"], ld.state["error"]), ("v2", None))
+
+    def test_an_extension_the_runtime_does_not_have_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "'video' is not available.*media"):
+            self.loader().load(extensions=["video"])
+        self.loader().load()                                  # the same with the core already in the cache
+        with self.assertRaisesRegex(ValueError, "'video' is not available"):
+            self.loader().load(extensions=["video"])
+        with self.assertRaisesRegex(ValueError, "'m' is not available"):
+            self.loader().load(extensions="media")            # a string where a list is meant
+        self.remote.stop()                                    # with no source to ask, the loader fails open as before
+        self.assertIsNone(self.loader().load(extensions=["video"]))
+
+    def test_a_damaged_cache_file_counts_as_no_file(self):
+        for name in ("state.json", os.path.join("latest", "manifest.json")):
+            for damage in (b"", b'{"version": "v1", "bund'):
+                with self.subTest(file=name, damage=damage):
+                    shutil.rmtree(self.cache, ignore_errors=True)
+                    self.loader().load()
+                    with open(os.path.join(self.cache, name), "wb") as f:
+                        f.write(damage)
+                    ld = self.loader()
+                    self.assertEqual(ld.load(), "CORE ONE")
+                    self.assertEqual((ld.state["source"], ld.state["error"]), ("remote", None))
+                    with open(os.path.join(self.cache, name), encoding="utf-8") as f:
+                        json.load(f)                          # written again
+
 
 class InjectorTests(unittest.TestCase):
     def setUp(self):
@@ -223,6 +255,15 @@ class InjectorTests(unittest.TestCase):
         msgs = [{"role": "system", "content": [{"type": "text", "text": "<ilang-runtime version=x>"}]}]
         self.assertEqual(inject(msgs, "block"), msgs)
 
+    def test_the_tag_quoted_outside_a_system_message_does_not_switch_the_runtime_off(self):
+        msgs = [{"role": "user", "content": 'what is <ilang-runtime version="v1">?'},
+                {"role": "assistant", "content": [{"type": "text", "text": "The <ilang-runtime tag opens it."}]},
+                {"role": "user", "content": "next"}]
+        out = ilang.wrap(msgs)
+        self.assertEqual(out[0]["role"], "system")
+        self.assertIn("CORE ONE", out[0]["content"])
+        self.assertEqual(out[1:], msgs)
+
     def test_fail_open_returns_the_messages_unchanged(self):
         self.remote.stop()
         ilang.configure(runtime=self.remote.base, cache_dir=tempfile.mkdtemp(), allow_custom_source=True)
@@ -237,6 +278,25 @@ class InjectorTests(unittest.TestCase):
         self.assertEqual((s["brand"], s["version"], s["commit"], s["channel"]), ("iLang", "v1", "c0ffeev1", "latest"))
         self.assertRegex(s["last_check"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
         self.assertGreaterEqual(s["age_seconds"], 0)
+
+    def test_the_version_in_the_tag_is_the_version_of_the_text_under_it(self):
+        self.remote.publish("v2", {"core": "CORE TWO"})
+        ld = ilang.configure(runtime=self.remote.base, cache_dir=self.cache, allow_custom_source=True)
+        ilang.system()
+        ilang.system(version="v1")                            # both are now in the loader's memory
+
+        class Shared(dict):                                   # another call's pinned load lands right after
+            def update(self, *args, **kwargs):                # this call has written the shared state
+                dict.update(self, *args, **kwargs)
+                if self["channel"] == "latest":
+                    ld.load(version="v1")
+
+        ld.state = Shared(ld.state)
+        self.assertIn('<ilang-runtime version="v2">\nCORE TWO', ilang.system())
+        self.assertIn('<ilang-runtime version="v1">\nCORE ONE', ilang.system(version="v1"))
+        del ld._memo[(("core",), None, None)]                 # latest is loaded afresh, as it is after the TTL
+        ilang.system()
+        self.assertIn('<ilang-runtime version="v2">\nCORE TWO', ilang.system())   # now served from memory
 
 
 @unittest.skipUnless(os.environ.get("ILANG_NETWORK_TESTS"), "set ILANG_NETWORK_TESTS=1")

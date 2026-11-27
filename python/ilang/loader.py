@@ -15,7 +15,7 @@ OFFICIAL = ("https://runtime.ilang.app/", "https://raw.githubusercontent.com/ila
             "https://github.com/ilang-ai/", "https://ilang.ai/")
 TTL = 3600
 TIMEOUT = 10
-AGENT = "ilang-loader-python/1.1.3"
+AGENT = "ilang-loader-python/1.1.4"
 CHANNELS = ("latest",)
 _COMMIT = re.compile(r"[0-9a-f]{7,40}")
 _VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.\-]*")
@@ -23,6 +23,11 @@ _VERSION = re.compile(r"[0-9A-Za-z][0-9A-Za-z.\-]*")
 
 class LoaderError(RuntimeError):
     pass
+
+
+class _UnknownExtension(Exception):
+    """An extension name the manifest in hand does not have. load() raises it to the caller as a
+    ValueError, like a wrong channel."""
 
 
 def _sha(data):
@@ -93,12 +98,18 @@ class Loader:
         raw = self._read("state.json")
         if not raw:
             return 0
-        state = json.loads(raw)                    # the JavaScript loader writes lastCheck
-        return state.get("last_check") or state.get("lastCheck") or 0
+        try:
+            state = json.loads(raw)                # the JavaScript loader writes lastCheck
+            return state.get("last_check") or state.get("lastCheck") or 0
+        except (ValueError, AttributeError):      # a damaged file counts as no file
+            return 0
 
     def _get(self, manifest, name, where, remote, base=None):
         """One bundle, verified against the manifest; (bytes, came_from_network)."""
         meta = manifest["bundles"].get(name)
+        if meta is None and name != "core":
+            raise _UnknownExtension("extension %r is not available; use a list of the names this runtime has: %s"
+                                    % (name, ", ".join(sorted(b for b in manifest["bundles"] if b != "core"))))
         if meta is None:
             raise LoaderError("the runtime has no bundle named %r" % name)
         data = self._read(*where, name + ".md")
@@ -121,14 +132,24 @@ class Loader:
         where = self._where(version, commit)
         pinned = bool(version or commit)
         cached = self._read(*where, "manifest.json")
-        manifest = json.loads(cached) if cached else None
+        try:
+            manifest = json.loads(cached) if cached else None
+        except ValueError:                        # a damaged file counts as no file: it is fetched again
+            manifest = None
         checked = False
         source_dir = runtime or self.runtime
         base = (self._commit_base(commit) if commit else
                 "%s/versions/%s" % (source_dir, version) if version else source_dir)
         if manifest is None or (not pinned and time.time() - self._last_check() >= self.ttl):
             manifest, checked = json.loads(self._fetch(base + "/manifest.json")), True
-        got = [self._get(manifest, n, where, True, base) for n in names]
+        try:
+            got = [self._get(manifest, n, where, True, base) for n in names]
+        except (LoaderError, _UnknownExtension):
+            if checked:
+                raise
+            # The manifest came from the cache and may be older than the runtime: fetch it once.
+            manifest, checked = json.loads(self._fetch(base + "/manifest.json")), True
+            got = [self._get(manifest, n, where, True, base) for n in names]
         for n, (data, new) in zip(names, got):   # write only once everything has verified
             if new:
                 self._write(data, *where, n + ".md")
@@ -147,6 +168,11 @@ class Loader:
 
         version= or commit= pins an exact runtime; both are immutable, so a pinned runtime is
         fetched once and then served from disk."""
+        return self._text_and_version(extensions, version, commit, channel, strict)[0]
+
+    def _text_and_version(self, extensions, version, commit, channel, strict):
+        """load(), with the version of the text it returns. A caller that labels the text takes
+        the version from here: self.state is shared, and another call may have written it since."""
         if channel not in CHANNELS:
             raise ValueError("channel %r is not available; use 'latest', or pin with version= or commit="
                              % (channel,))
@@ -155,22 +181,26 @@ class Loader:
         if commit is not None and not _COMMIT.fullmatch(commit):
             raise ValueError("commit must be 7 to 40 lowercase hex characters")
         if version is not None and not _VERSION.fullmatch(version):
-            raise ValueError("version must look like 2026.09.22-a69b7d69b3a6")
+            raise ValueError("version must look like 2026.11.19-105ffdc14ac2")
         names = ["core"] + [e for e in extensions if e != "core"]
         key = (tuple(names), version, commit)
         hit = self._memo.get(key)
         if hit and (version or commit or time.time() - hit[1] < self.ttl):
             self.state.update(hit[2])
-            return hit[0]
+            return hit[0], hit[2]["version"]
         try:
             manifest, texts, source = self._load(names, version, commit)
             self.state["error"] = None
+        except _UnknownExtension as err:          # the caller's mistake, like a wrong channel
+            raise ValueError(str(err)) from None
         except Exception as err:                  # network, hash or parse failure
             self.state["error"] = "%s: %s" % (type(err).__name__, err)
             if self.fallback and not commit:      # a commit is already read from the canon
                 try:
                     manifest, texts, source = self._load(names, version, commit, self.fallback)
                     self.state["error"] = None
+                except _UnknownExtension as err2:
+                    raise ValueError(str(err2)) from None
                 except Exception as err2:
                     self.state["error"] += "; fallback %s: %s" % (type(err2).__name__, err2)
         if self.state["error"] is not None:
@@ -183,13 +213,13 @@ class Loader:
                 if strict:
                     raise LoaderError(self.state["error"])
                 self.state.update(loaded=False, source="none")
-                return None
-        self.state.update(loaded=True, source=source, version=manifest["version"],
-                          channel="pinned" if version or commit else "latest",
-                          source_commit=manifest["source_commit"],
-                          last_check=self._last_check() or None)
+                return None, None
+        # This load's own values, kept with its text: self.state is shared and may have been written since.
+        loaded = {"loaded": True, "source": source, "version": manifest["version"],
+                  "channel": "pinned" if version or commit else "latest",
+                  "source_commit": manifest["source_commit"]}
+        self.state.update(loaded, last_check=self._last_check() or None)
         text = "\n\n".join(texts)
         if self.state["error"] is None:           # a fallback copy is re-checked next call
-            self._memo[key] = (text, time.time(), {k: self.state[k] for k in
-                                                    ("loaded", "channel", "source", "version", "source_commit")})
-        return text
+            self._memo[key] = (text, time.time(), loaded)
+        return text, manifest["version"]

@@ -80,7 +80,8 @@ The runtime itself is generated in the canon repository from the specification f
 
 ```python
 ilang.wrap(messages, extensions=["media"])                # add the image, video and audio vocabulary
-ilang.wrap(messages, version="2026.09.22-a69b7d69b3a6")   # pin an exact runtime for reproducible runs
+ilang.wrap(messages, version="2026.11.19-105ffdc14ac2",   # pin an exact runtime for reproducible runs;
+           strict=True)                                   # strict, so that a pin that cannot be loaded raises
 ilang.wrap(messages, commit="85d1608")                    # or pin the runtime as it is at one canon commit
 ilang.wrap(messages, merge_system=True)                   # one system message: the runtime, then your prompt
 ilang.wrap(messages, strict=True)                         # raise instead of failing open
@@ -102,7 +103,7 @@ The JavaScript API takes the same options as an object: `wrap(messages, { extens
 
 ## Checked with real models
 
-On 23 September 2026 each of these models got the current core runtime through the loader and two requests. First, an iLang operation chain that reads `report.csv`, keeps the failed rows, counts them and outputs the count: every model answered with a chain that passes the canon grammar validator with no error or warning. Second, a question about a part the core bundle leaves out, the eight declaration body forms: every model said the section was not loaded and pointed to it instead of guessing.
+On 23 September 2026 each of these models got the current core runtime through the loader and two requests. First, an iLang operation chain that reads `report.csv`, keeps the failed rows, counts them and outputs the count: every model answered with a chain that passed the canon grammar validator of that day with no error or warning. Since ilang-spec 5.0.19 the validator also reports a second `|` between the modifiers of one operation as a warning, because modifiers are separated by commas; the deepseek and qwen answers below, kept as they were given, would now draw it. Second, a question about a part the core bundle leaves out, the eight declaration body forms: every model said the section was not loaded and pointed to it instead of guessing.
 
 | Model | API | Chain |
 |---|---|---|
@@ -117,7 +118,7 @@ This shows that each provider takes the wrapped request; how well a model follow
 
 ## Pinning for research
 
-Every runtime version is kept under its own immutable path in the canon repository. Pin one with `version=` and a benchmark, an audit or a paper can be re-run against exactly the context it used. `ilang.status()` reports the version and the canon commit in use.
+Each runtime version has its own path in the canon repository, and a pin loads while its snapshot is there: the snapshots published since 2026-11-06 are. Pin one with `version=` and `strict=True`, so that a pin that can no longer be loaded raises instead of sending the messages without the runtime, and a benchmark, an audit or a paper can be re-run against exactly the context it used. `ilang.status()` reports the version, and the canon commit the bundle was built from. That commit is not a value for `commit=`: the bundle built from a commit is committed after it, so `commit=` with that value loads the build before. To load the same runtime again, pin the version `status()` reports.
 
 What loading the runtime does and does not achieve is measured, not assumed: see the [iLang conformance results](https://research.ilang.ai/datasets/ilang-conformance/) and the preprint [*The Missing Definition of Right*](https://doi.org/10.5281/zenodo.22882691).
 
